@@ -26,7 +26,7 @@ class Lake:
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
         options = f" (DATA_PATH '{_q(data_path)}')" if data_path else ""
-        self.con.execute(f"ATTACH 'ducklake:{catalog_path}' AS {self.ALIAS}{options}")
+        self.con.execute(f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}")
 
     def ensure_epss_table(self) -> None:
         self.con.execute(
