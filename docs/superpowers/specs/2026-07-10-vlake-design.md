@@ -68,15 +68,12 @@ CREATE TABLE epss (
   model_version VARCHAR    -- CSV 先頭コメント行由来 ('v2023.03.01' 等)
 );
 
-CREATE TABLE datasets (    -- ライセンス情報をデータと共に配布するメタテーブル
-  name          VARCHAR,   -- 'epss'
-  source_url    VARCHAR,
-  license_name  VARCHAR,
-  license_text  VARCHAR,   -- 準拠条文の原文引用
-  attribution   VARCHAR,
-  disclaimer    VARCHAR,
-  updated_at    TIMESTAMP
-);
+-- ライセンス情報をデータと共に配布するメタ「ビュー」。
+-- テーブルでなくビューにするのは、DuckLake テーブルへの INSERT は Parquet
+-- データファイルを生むため。ビュー定義はカタログファイル内にのみ存在し、
+-- 更新のたびに CREATE OR REPLACE で作り直す。
+CREATE VIEW datasets AS SELECT * FROM (VALUES (...))
+  AS t(name, source_url, license_name, license_text, attribution, disclaimer);
 ```
 
 ### 実装スタック
