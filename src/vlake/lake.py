@@ -22,6 +22,7 @@ class Lake:
     META = "__ducklake_metadata_lake"
 
     def __init__(self, catalog_path: Path, data_path: str | None = None):
+        self._closed = False
         self.con = duckdb.connect()
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -75,4 +76,7 @@ class Lake:
         return self.con.execute(sql).fetchall()
 
     def close(self) -> None:
+        if self._closed:
+            return
         self.con.close()
+        self._closed = True

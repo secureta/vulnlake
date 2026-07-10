@@ -81,6 +81,13 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
     assert report["max_date"] == date(2026, 7, 10)
 
 
+def test_verify_without_catalog(cfg):
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert "files_in_storage" in report
+    assert report["error"] == "catalog not found"
+
+
 def test_rebuild_catalog(cfg, monkeypatch):
     raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
     monkeypatch.setattr(epss, "fetch", lambda target=None: raw)

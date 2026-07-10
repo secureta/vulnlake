@@ -60,13 +60,15 @@ def update_epss(cfg: Config, target: date | None = None) -> str:
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         lake, catalog = _open_lake(storage, workdir)
-        added, score_date = _ingest_day(
-            storage, lake, raw, fallback=target or date.today(), workdir=workdir
-        )
-        if not added:
+        try:
+            added, score_date = _ingest_day(
+                storage, lake, raw, fallback=target or date.today(), workdir=workdir
+            )
+            if not added:
+                return f"already-registered {score_date}"
+            _publish_catalog(storage, lake, catalog)
+        finally:
             lake.close()
-            return f"already-registered {score_date}"
-        _publish_catalog(storage, lake, catalog)
     return f"published {score_date}"
 
 
@@ -82,16 +84,19 @@ def backfill_epss(cfg: Config, source_dir: Path) -> str:
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         lake, catalog = _open_lake(storage, workdir)
-        for i, path in enumerate(files, 1):
-            file_date = date.fromisoformat(_BACKFILL_NAME.search(path.name).group(1))
-            ok, _ = _ingest_day(
-                storage, lake, path.read_bytes(), fallback=file_date, workdir=workdir
-            )
-            added += ok
-            skipped += not ok
-            if i % 50 == 0:
-                print(f"  {i}/{len(files)} 処理済み")
-        _publish_catalog(storage, lake, catalog)
+        try:
+            for i, path in enumerate(files, 1):
+                file_date = date.fromisoformat(_BACKFILL_NAME.search(path.name).group(1))
+                ok, _ = _ingest_day(
+                    storage, lake, path.read_bytes(), fallback=file_date, workdir=workdir
+                )
+                added += ok
+                skipped += not ok
+                if i % 50 == 0:
+                    print(f"  {i}/{len(files)} 処理済み")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
     return f"backfilled {added} files (skipped {skipped})"
 
 
@@ -103,10 +108,13 @@ def rebuild_catalog(cfg: Config) -> str:
         workdir = Path(td)
         catalog = workdir / CATALOG_KEY
         lake = Lake(catalog, data_path=storage.url("unused"))
-        lake.ensure_epss_table()
-        for key in keys:
-            lake.add_file("epss", storage.url(key))
-        _publish_catalog(storage, lake, catalog)
+        try:
+            lake.ensure_epss_table()
+            for key in keys:
+                lake.add_file("epss", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
     return f"rebuilt catalog with {len(keys)} files"
 
 
@@ -121,15 +129,25 @@ def verify(cfg: Config) -> dict:
     with tempfile.TemporaryDirectory() as td:
         catalog = Path(td) / CATALOG_KEY
         if not storage.get(CATALOG_KEY, catalog):
-            return {"ok": False, "error": "catalog not found"}
+            return {
+                "files_in_storage": len(keys),
+                "files_in_catalog": 0,
+                "row_count": 0,
+                "min_date": None,
+                "max_date": None,
+                "ok": False,
+                "error": "catalog not found",
+            }
         lake = Lake(catalog)
-        (n_files,) = lake.query(
-            f"SELECT count(*) FROM {lake.META}.ducklake_data_file WHERE end_snapshot IS NULL"
-        )[0]
-        row_count, min_date, max_date = lake.query(
-            f"SELECT count(*), min(date), max(date) FROM {lake.ALIAS}.epss"
-        )[0]
-        lake.close()
+        try:
+            (n_files,) = lake.query(
+                f"SELECT count(*) FROM {lake.META}.ducklake_data_file WHERE end_snapshot IS NULL"
+            )[0]
+            row_count, min_date, max_date = lake.query(
+                f"SELECT count(*), min(date), max(date) FROM {lake.ALIAS}.epss"
+            )[0]
+        finally:
+            lake.close()
     return {
         "files_in_storage": len(keys),
         "files_in_catalog": n_files,
