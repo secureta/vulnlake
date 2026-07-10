@@ -1,0 +1,28 @@
+name: publish
+on:
+  schedule:
+    - cron: "30 14 * * *"  # EPSS 更新 (~13:30 UTC) の後
+  workflow_dispatch:
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run vlake update epss
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ secrets.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+      - run: uv run vlake verify
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ secrets.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
