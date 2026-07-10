@@ -18,6 +18,17 @@ from .storage import Storage, make_storage
 
 CATALOG_KEY = "vlake.ducklake"
 _BACKFILL_NAME = re.compile(r"epss_scores-(\d{4}-\d{2}-\d{2})\.csv\.gz$")
+_KEY_DATE = re.compile(r"epss-(\d{4}-\d{2}-\d{2})\.parquet$")
+
+
+def _dates_from_keys(keys: list[str]) -> list[date]:
+    """ストレージキー (epss.key_for の出力) からファイル名由来の日付を抽出する。"""
+    dates = []
+    for key in keys:
+        m = _KEY_DATE.search(key)
+        if m:
+            dates.append(date.fromisoformat(m.group(1)))
+    return dates
 
 
 def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
@@ -104,6 +115,8 @@ def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
     keys = [k for k in storage.list("epss/") if k.endswith(".parquet")]
+    if not keys:
+        return "refused: no parquet files in storage"
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         catalog = workdir / CATALOG_KEY
@@ -118,41 +131,59 @@ def rebuild_catalog(cfg: Config) -> str:
     return f"rebuilt catalog with {len(keys)} files"
 
 
-def verify(cfg: Config) -> dict:
+def verify(cfg: Config, max_age_days: int | None = None) -> dict:
     """カタログとストレージの整合を検証する。
 
-    count(*)/min/max はファイル統計 (メタデータ) で解決されるため、
+    件数一致だけでは「同数だが中身が違う」差し替えを見逃すため、
+    登録パスの集合 (Lake.registered_paths()) をストレージの実キー集合と突き合わせ、
+    さらにファイル名由来の日付 (epss-YYYY-MM-DD.parquet) の min/max をカタログの
+    min(date)/max(date) と突き合わせる。row_count/min_date/max_date 自体は
+    count(*)/min/max のファイル統計 (メタデータ) で解決されるため、
     リモートでも全 Parquet の読み込みは発生しない。
+
+    max_age_days を指定すると、カタログの max_date が古すぎる場合に
+    report["stale"] = True を立てる (ok には影響しない、上流の恒常的な
+    403/404 で更新が止まっていても ok=True のまま緑になり続ける問題への対処)。
     """
     storage = make_storage(cfg)
     keys = [k for k in storage.list("epss/") if k.endswith(".parquet")]
+    storage_paths = {storage.url(k) for k in keys}
+    key_dates = _dates_from_keys(keys)
     with tempfile.TemporaryDirectory() as td:
         catalog = Path(td) / CATALOG_KEY
         if not storage.get(CATALOG_KEY, catalog):
             return {
                 "files_in_storage": len(keys),
-                "files_in_catalog": 0,
-                "row_count": 0,
+                "files_in_catalog": None,
+                "row_count": None,
                 "min_date": None,
                 "max_date": None,
                 "ok": False,
+                "stale": False,
                 "error": "catalog not found",
             }
         lake = Lake(catalog)
         try:
-            (n_files,) = lake.query(
-                f"SELECT count(*) FROM {lake.META}.ducklake_data_file WHERE end_snapshot IS NULL"
-            )[0]
+            catalog_paths = lake.registered_paths()
             row_count, min_date, max_date = lake.query(
                 f"SELECT count(*), min(date), max(date) FROM {lake.ALIAS}.epss"
             )[0]
         finally:
             lake.close()
+    ok = storage_paths == catalog_paths
+    if key_dates:
+        ok = ok and min_date == min(key_dates) and max_date == max(key_dates)
+    stale = (
+        max_age_days is not None
+        and max_date is not None
+        and (date.today() - max_date).days > max_age_days
+    )
     return {
         "files_in_storage": len(keys),
-        "files_in_catalog": n_files,
+        "files_in_catalog": len(catalog_paths),
         "row_count": row_count,
         "min_date": min_date,
         "max_date": max_date,
-        "ok": len(keys) == n_files,
+        "ok": ok,
+        "stale": stale,
     }

@@ -81,11 +81,62 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
     assert report["max_date"] == date(2026, 7, 10)
 
 
-def test_verify_without_catalog(cfg):
+def test_verify_without_catalog(cfg, monkeypatch):
+    # ストレージに Parquet はあるがカタログだけ失われているケース
+    raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg) == "published 2026-07-10"
+    (cfg.local_dir / "vlake.ducklake").unlink()
+
     report = pipeline.verify(cfg)
     assert report["ok"] is False
-    assert "files_in_storage" in report
+    assert report["stale"] is False
+    assert report["files_in_storage"] == 1
+    assert report["files_in_catalog"] is None
+    assert report["row_count"] is None
+    assert report["min_date"] is None
+    assert report["max_date"] is None
     assert report["error"] == "catalog not found"
+
+
+def test_verify_detects_untracked_file(cfg, monkeypatch):
+    """件数一致だけでは見逃す差し替え/混入をパス集合比較で検出できること。"""
+    raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg) == "published 2026-07-10"
+
+    stray = cfg.local_dir / "epss" / "year=2099" / "epss-2099-01-01.parquet"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not a real parquet file")
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert report["files_in_storage"] == 2
+    assert report["files_in_catalog"] == 1
+
+
+def test_verify_staleness_flags_old_max_date(cfg, monkeypatch):
+    raw = make_epss_csv_gz(
+        date(2021, 4, 14),
+        [("CVE-2020-5902", 0.65117)],
+        with_comment=False,
+        with_percentile=False,
+    )
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg, date(2021, 4, 14)) == "published 2021-04-14"
+
+    report = pipeline.verify(cfg, max_age_days=3)
+    assert report["ok"] is True
+    assert report["stale"] is True
+
+
+def test_verify_staleness_default_false_for_recent_day(cfg, monkeypatch):
+    raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg) == "published 2026-07-10"
+
+    report = pipeline.verify(cfg)
+    assert report["stale"] is False
 
 
 def test_rebuild_catalog(cfg, monkeypatch):
@@ -98,3 +149,8 @@ def test_rebuild_catalog(cfg, monkeypatch):
     assert pipeline.rebuild_catalog(cfg) == "rebuilt catalog with 1 files"
     con = _attach(cfg)
     assert con.execute("SELECT count(*) FROM frozen.epss").fetchone()[0] == 1
+
+
+def test_rebuild_catalog_refuses_when_empty(cfg):
+    assert pipeline.rebuild_catalog(cfg) == "refused: no parquet files in storage"
+    assert not (cfg.local_dir / "vlake.ducklake").exists()

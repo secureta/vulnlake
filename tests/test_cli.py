@@ -22,6 +22,26 @@ def test_update_via_cli(monkeypatch, tmp_path):
     assert "'ok': True" in result.output
 
 
+def test_verify_exit_1_when_stale(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    raw = make_epss_csv_gz(
+        date(2021, 4, 14),
+        [("CVE-2020-5902", 0.65117)],
+        with_comment=False,
+        with_percentile=False,
+    )
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+
+    result = CliRunner().invoke(main, ["update", "epss", "--date", "2021-04-14"])
+    assert result.exit_code == 0, result.output
+
+    result = CliRunner().invoke(main, ["verify", "--max-age-days", "3"])
+    assert result.exit_code == 1
+    assert "'ok': True" in result.output
+    assert "'stale': True" in result.output
+
+
 def test_update_with_date_option(monkeypatch, tmp_path):
     monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)

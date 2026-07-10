@@ -37,6 +37,7 @@ export VLAKE_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com  # or AWS S3
 export VLAKE_S3_BUCKET=my-vlake
 export VLAKE_PUBLIC_URL=https://data.example.com   # public base URL of the bucket
 export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+export AWS_DEFAULT_REGION=auto   # `auto` works for R2; use a real region for AWS S3
 
 # one-time backfill (avoids hammering the official CDN)
 git clone --depth 1 https://github.com/empiricalsec/epss_scores /tmp/epss_scores
@@ -52,6 +53,13 @@ Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variab
 The included GitHub Actions workflow (`.github/workflows/publish.yml`) runs
 `vlake update epss` daily at 14:30 UTC (EPSS publishes around 13:30 UTC).
 Fork the repo, set the secrets above, and you have your own lake.
+
+Notes:
+- Scheduled workflows are disabled by default on forks — after forking, open the
+  **Actions** tab and enable workflows before the daily cron will run.
+- `VLAKE_PUBLIC_URL` is baked into the catalog at publish time. If you change it
+  later (e.g. moving to a new domain), run `vlake rebuild-catalog` afterwards so
+  the catalog's data file paths point at the new URL.
 
 ## Data licenses
 

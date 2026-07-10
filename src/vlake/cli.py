@@ -42,10 +42,12 @@ def rebuild_catalog() -> None:
 
 
 @main.command()
-def verify() -> None:
+@click.option("--max-age-days", type=int, default=None,
+              help="カタログの最新日がこの日数より古ければ stale として exit 1 にする")
+def verify(max_age_days: int | None) -> None:
     """カタログとストレージの整合を検証する。"""
     cfg = Config.from_env()
-    report = pipeline.verify(cfg)
+    report = pipeline.verify(cfg, max_age_days=max_age_days)
     click.echo(str(report))
-    if not report["ok"]:
+    if not report["ok"] or report["stale"]:
         raise SystemExit(1)
