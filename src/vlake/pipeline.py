@@ -49,6 +49,12 @@ def _years_from_keys(keys: list[str]) -> set[int]:
     return years
 
 
+def _daily_registered(paths: set[str], year: int) -> bool:
+    """指定年の日次ファイルがカタログに登録済みかどうか。"""
+    pat = re.compile(rf"epss-{year}-\d{{2}}-\d{{2}}\.parquet$")
+    return any(pat.search(p) for p in paths)
+
+
 def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
     """カタログをストレージから取得して開く。無ければ新規作成 (DATA_PATH 焼き込み)。"""
     catalog = workdir / CATALOG_KEY
@@ -170,6 +176,10 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
                 days = by_year[year]
                 if year < current_year:
                     if storage.url(epss.year_key_for(year)) in registered:
+                        skipped_years += 1
+                        continue
+                    if _daily_registered(registered, year):
+                        print(f"  {year}: 日次ファイルが登録済みのため skip (年集約は行わない)")
                         skipped_years += 1
                         continue
                     _ingest_year(storage, lake, year, days, workdir)
