@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 from datetime import date
 from pathlib import Path
+
+import duckdb
 
 from . import epss
 from .config import Config
@@ -78,6 +81,47 @@ def _ingest_day(
     return True, score_date
 
 
+def _sort_merge(day_dir: Path, out: Path, workdir: Path) -> None:
+    """日次 Parquet 群を (cve, date) ソートの単一 Parquet に集約する。
+
+    DuckDB の外部ソート (temp_directory へのスピル) を使うため、
+    1年分 (最大1億行規模) をメモリに載せない。
+    """
+    con = duckdb.connect()
+    try:
+        tmp = str(workdir / "duckdb_tmp").replace("'", "''")
+        src = str(day_dir / "*.parquet").replace("'", "''")
+        dst = str(out).replace("'", "''")
+        con.execute(f"SET temp_directory='{tmp}'")
+        con.execute(
+            f"COPY (SELECT * FROM read_parquet('{src}') ORDER BY cve, date) "
+            f"TO '{dst}' (FORMAT parquet, COMPRESSION zstd)"
+        )
+    finally:
+        con.close()
+
+
+def _ingest_year(
+    storage: Storage, lake: Lake, year: int, days: list[tuple[date, Path]], workdir: Path
+) -> None:
+    """確定年の全日次 CSV を年1ファイルに集約して登録する。"""
+    day_dir = workdir / f"days-{year}"
+    day_dir.mkdir()
+    model_versions = set()
+    for d, path in days:
+        table, _, model_version = epss.parse(path.read_bytes(), fallback_date=d)
+        epss.write_parquet(table, day_dir / f"{d.isoformat()}.parquet")
+        model_versions.add(model_version)
+    year_parquet = workdir / f"epss-{year}.parquet"
+    _sort_merge(day_dir, year_parquet, workdir)
+    key = epss.year_key_for(year)
+    storage.put(year_parquet, key)
+    lake.set_message(f"epss {year} backfill ({', '.join(sorted(model_versions))})")
+    lake.add_file("epss", storage.url(key))
+    shutil.rmtree(day_dir)
+    year_parquet.unlink()
+
+
 def update_epss(cfg: Config, target: date | None = None) -> str:
     storage = make_storage(cfg)
     raw = epss.fetch(target)
@@ -98,32 +142,54 @@ def update_epss(cfg: Config, target: date | None = None) -> str:
     return f"published {score_date}"
 
 
-def backfill_epss(cfg: Config, source_dir: Path) -> str:
-    """empiricalsec/epss_scores の clone (等) から全履歴を取り込む。"""
+def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> str:
+    """empiricalsec/epss_scores の clone (等) から全履歴を取り込む。
+
+    確定した過去年 (today の年より前) は年1ファイル (cve, date ソート) に集約し、
+    進行中の年は日次のまま登録する。today はテスト用の注入点 (省略時は実日付)。
+    """
     storage = make_storage(cfg)
+    current_year = (today or date.today()).year
     files = sorted(
         p
         for p in source_dir.rglob("epss_scores-*.csv.gz")
         if "beta_scores" not in p.parts and _BACKFILL_NAME.search(p.name)
     )
-    added = skipped = 0
+    by_year: dict[int, list[tuple[date, Path]]] = {}
+    for path in files:
+        d = date.fromisoformat(_BACKFILL_NAME.search(path.name).group(1))
+        by_year.setdefault(d.year, []).append((d, path))
+
+    added_years = skipped_years = added_days = skipped_days = 0
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         lake, catalog = _open_lake(storage, workdir)
         try:
-            for i, path in enumerate(files, 1):
-                file_date = date.fromisoformat(_BACKFILL_NAME.search(path.name).group(1))
-                ok, _ = _ingest_day(
-                    storage, lake, path.read_bytes(), fallback=file_date, workdir=workdir
-                )
-                added += ok
-                skipped += not ok
-                if i % 50 == 0:
-                    print(f"  {i}/{len(files)} 処理済み")
+            registered = lake.registered_paths()
+            for year in sorted(by_year):
+                days = by_year[year]
+                if year < current_year:
+                    if storage.url(epss.year_key_for(year)) in registered:
+                        skipped_years += 1
+                        continue
+                    _ingest_year(storage, lake, year, days, workdir)
+                    added_years += 1
+                    print(f"  {year}: 年ファイル登録 ({len(days)}日分)")
+                else:
+                    for d, path in days:
+                        ok, _ = _ingest_day(
+                            storage, lake, path.read_bytes(), fallback=d, workdir=workdir
+                        )
+                        added_days += ok
+                        skipped_days += not ok
+                    print(f"  {year}: 日次 {len(days)}日分 (新規 {added_days})")
             _publish_catalog(storage, lake, catalog)
         finally:
             lake.close()
-    return f"backfilled {added} files (skipped {skipped})"
+    return (
+        f"backfilled {added_years} year files, {added_days} daily files "
+        f"(skipped {skipped_years} years, {skipped_days} daily)"
+    )
 
 
 def rebuild_catalog(cfg: Config) -> str:

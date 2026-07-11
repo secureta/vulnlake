@@ -66,8 +66,12 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
     )
     (src / "beta_scores" / "epss_scores-2099-01-01.csv.gz").write_bytes(b"ignored")
 
-    assert pipeline.backfill_epss(cfg, src) == "backfilled 2 files (skipped 0)"
-    assert pipeline.backfill_epss(cfg, src) == "backfilled 0 files (skipped 2)"
+    assert pipeline.backfill_epss(cfg, src) == (
+        "backfilled 1 year files, 0 daily files (skipped 0 years, 0 daily)"
+    )
+    assert pipeline.backfill_epss(cfg, src) == (
+        "backfilled 0 year files, 0 daily files (skipped 1 years, 0 daily)"
+    )
 
     raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
     monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
@@ -75,10 +79,56 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
 
     report = pipeline.verify(cfg)
     assert report["ok"] is True
-    assert report["files_in_storage"] == report["files_in_catalog"] == 3
+    assert report["files_in_storage"] == report["files_in_catalog"] == 2
     assert report["row_count"] == 3
     assert report["min_date"] == date(2021, 4, 14)
     assert report["max_date"] == date(2026, 7, 10)
+
+
+def test_backfill_consolidates_closed_years(cfg, tmp_path):
+    src = tmp_path / "mirror"
+    days = [
+        (date(2021, 4, 14), [("CVE-2020-5902", 0.65117)],
+         dict(with_comment=False, with_percentile=False)),
+        (date(2021, 4, 15), [("CVE-2020-5902", 0.66, 0.99), ("CVE-2020-0001", 0.01, 0.1)],
+         dict(model_version="v1")),
+        (date(2022, 1, 1), [("CVE-2020-5902", 0.7, 0.99)], dict(model_version="v2")),
+        (date(2023, 1, 5), [("CVE-2020-5902", 0.8, 0.99)], dict(model_version="v3")),
+        (date(2023, 1, 6), [("CVE-2020-5902", 0.81, 0.99)], dict(model_version="v3")),
+    ]
+    for d, rows, kw in days:
+        p = src / str(d.year) / f"epss_scores-{d.isoformat()}.csv.gz"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(make_epss_csv_gz(d, rows, **kw))
+
+    # today を注入: 2023 が「進行中の年」
+    msg = pipeline.backfill_epss(cfg, src, today=date(2023, 6, 1))
+    assert msg == "backfilled 2 year files, 2 daily files (skipped 0 years, 0 daily)"
+
+    epss_dir = cfg.local_dir / "epss"
+    assert (epss_dir / "year=2021" / "epss-2021.parquet").exists()
+    assert (epss_dir / "year=2022" / "epss-2022.parquet").exists()
+    assert (epss_dir / "year=2023" / "epss-2023-01-05.parquet").exists()
+    assert (epss_dir / "year=2023" / "epss-2023-01-06.parquet").exists()
+
+    # 年ファイル内は (cve, date) ソート
+    con = duckdb.connect()
+    rows = con.execute(
+        f"SELECT cve, date FROM read_parquet('{epss_dir / 'year=2021' / 'epss-2021.parquet'}')"
+    ).fetchall()
+    assert len(rows) == 3
+    assert rows == sorted(rows)
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True
+    assert report["files_in_storage"] == report["files_in_catalog"] == 4
+    assert report["row_count"] == 6
+    assert report["min_date"] == date(2021, 4, 14)
+    assert report["max_date"] == date(2023, 1, 6)
+
+    # 冪等: 再実行はすべて skip
+    msg = pipeline.backfill_epss(cfg, src, today=date(2023, 6, 1))
+    assert msg == "backfilled 0 year files, 0 daily files (skipped 2 years, 2 daily)"
 
 
 def test_verify_without_catalog(cfg, monkeypatch):
