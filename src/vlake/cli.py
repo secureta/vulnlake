@@ -28,7 +28,11 @@ def update(dataset: str, target) -> None:
     if dataset == "cve":
         if target is not None:
             raise click.UsageError("cve は常に最新 baseline を取得します (--date 非対応)")
-        click.echo(pipeline.update_cve(cfg))
+        result = pipeline.update_cve(cfg)
+        click.echo(result)
+        if result.startswith("refused"):
+            # backfill 未実施のまま日次更新だけが緑になるサイレント失敗を防ぐ
+            raise SystemExit(1)
     else:
         click.echo(pipeline.update_epss(cfg, target.date() if target else None))
 

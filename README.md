@@ -129,6 +129,11 @@ EPSS scores provided by FIRST.org — https://www.first.org/epss.
 This project redistributes EPSS data but is not endorsed or certified by FIRST.
 See [DATA_LICENSES.md](DATA_LICENSES.md) and the in-lake `datasets` view.
 
+CVE data is redistributed under the CVE Terms of Use (SPDX: `cve-tou`) —
+https://www.cve.org/Legal/TermsOfUse. CVE® is a registered trademark of The
+MITRE Corporation. CVE Records: Copyright © 1999-2026 The MITRE Corporation.
+See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+
 ## Code license
 
 Apache-2.0

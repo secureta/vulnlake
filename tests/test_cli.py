@@ -76,6 +76,20 @@ def test_update_cve_via_cli(monkeypatch, tmp_path):
     assert "published 2026-07-11" in result.output
 
 
+def test_update_cve_refused_exits_nonzero(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline, "update_cve",
+        lambda cfg: "refused: cve_history is empty; run backfill cve first",
+    )
+    result = CliRunner().invoke(main, ["update", "cve"])
+    assert result.exit_code == 1
+    assert "refused" in result.output
+
+
 def test_update_cve_rejects_date_option(monkeypatch, tmp_path):
     monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
