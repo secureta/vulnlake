@@ -14,32 +14,44 @@ def main() -> None:
 
 
 @main.command()
-@click.argument("dataset", type=click.Choice(["epss"]))
+@click.argument("dataset", type=click.Choice(["epss", "cve"]))
 @click.option(
     "--date",
     "target",
     type=click.DateTime(["%Y-%m-%d"]),
     default=None,
-    help="取得する日付 (省略時は最新)",
+    help="取得する日付 (epss のみ。省略時は最新)",
 )
 def update(dataset: str, target) -> None:
     """日次更新 (冪等)。"""
     cfg = Config.from_env()
-    click.echo(pipeline.update_epss(cfg, target.date() if target else None))
+    if dataset == "cve":
+        if target is not None:
+            raise click.UsageError("cve は常に最新 baseline を取得します (--date 非対応)")
+        click.echo(pipeline.update_cve(cfg))
+    else:
+        click.echo(pipeline.update_epss(cfg, target.date() if target else None))
 
 
 @main.command()
-@click.argument("dataset", type=click.Choice(["epss"]))
+@click.argument("dataset", type=click.Choice(["epss", "cve"]))
 @click.option(
     "--source",
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="empiricalsec/epss_scores の clone ディレクトリ",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="epss: mirror clone ディレクトリ (必須) / cve: baseline zip ファイル (省略時は最新をダウンロード)",
 )
-def backfill(dataset: str, source: Path) -> None:
+def backfill(dataset: str, source: Path | None) -> None:
     """全履歴の一括取り込み (冪等)。"""
     cfg = Config.from_env()
-    click.echo(pipeline.backfill_epss(cfg, source))
+    if dataset == "epss":
+        if source is None or not source.is_dir():
+            raise click.UsageError("epss には --source <mirror clone ディレクトリ> が必要です")
+        click.echo(pipeline.backfill_epss(cfg, source))
+    else:
+        if source is not None and not source.is_file():
+            raise click.UsageError("cve の --source は baseline zip ファイルです")
+        click.echo(pipeline.backfill_cve(cfg, source))
 
 
 @main.command("rebuild-catalog")

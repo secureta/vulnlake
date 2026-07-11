@@ -63,3 +63,41 @@ def test_help():
     assert result.exit_code == 0
     for cmd in ("update", "backfill", "rebuild-catalog", "verify"):
         assert cmd in result.output
+
+
+def test_update_cve_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(pipeline, "update_cve", lambda cfg: "published 2026-07-11 (5 records, 0 bad)")
+    result = CliRunner().invoke(main, ["update", "cve"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-11" in result.output
+
+
+def test_update_cve_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "cve", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_cve_via_cli_with_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path / "bucket"))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from tests.conftest import make_baseline_zip, make_cve_record
+
+    zp = tmp_path / "baseline.zip"
+    make_baseline_zip(zp, [make_cve_record("CVE-2021-0001")])
+    result = CliRunner().invoke(main, ["backfill", "cve", "--source", str(zp)])
+    assert result.exit_code == 0, result.output
+    assert "backfilled 1 year files" in result.output
+
+
+def test_backfill_epss_requires_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "epss"])
+    assert result.exit_code != 0
