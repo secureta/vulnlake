@@ -52,7 +52,9 @@ Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variab
 
 The included GitHub Actions workflow (`.github/workflows/publish.yml`) runs
 `vlake update epss` daily at 14:30 UTC (EPSS publishes around 13:30 UTC).
-Fork the repo, set the secrets above, and you have your own lake.
+Fork the repo, configure the values above (`VLAKE_PUBLIC_URL` as a repository
+**variable** or secret — it is not sensitive; everything else as **secrets**),
+and you have your own lake.
 
 Notes:
 - Scheduled workflows are disabled by default on forks — after forking, open the
