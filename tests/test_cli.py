@@ -70,7 +70,9 @@ def test_update_cve_via_cli(monkeypatch, tmp_path):
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
     from vlake import pipeline
 
-    monkeypatch.setattr(pipeline, "update_cve", lambda cfg: "published 2026-07-11 (5 records, 0 bad)")
+    monkeypatch.setattr(
+        pipeline, "update_cve", lambda cfg: "published 2026-07-11 (5 records, 0 bad)"
+    )
     result = CliRunner().invoke(main, ["update", "cve"])
     assert result.exit_code == 0, result.output
     assert "published 2026-07-11" in result.output
@@ -82,7 +84,8 @@ def test_update_cve_refused_exits_nonzero(monkeypatch, tmp_path):
     from vlake import pipeline
 
     monkeypatch.setattr(
-        pipeline, "update_cve",
+        pipeline,
+        "update_cve",
         lambda cfg: "refused: cve_history is empty; run backfill cve first",
     )
     result = CliRunner().invoke(main, ["update", "cve"])

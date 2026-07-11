@@ -27,7 +27,9 @@ def update(dataset: str, target) -> None:
     cfg = Config.from_env()
     if dataset == "cve":
         if target is not None:
-            raise click.UsageError("cve は常に最新 baseline を取得します (--date 非対応)")
+            raise click.UsageError(
+                "cve は常に最新 baseline を取得します (--date 非対応)"
+            )
         result = pipeline.update_cve(cfg)
         click.echo(result)
         if result.startswith("refused"):
@@ -50,7 +52,9 @@ def backfill(dataset: str, source: Path | None) -> None:
     cfg = Config.from_env()
     if dataset == "epss":
         if source is None or not source.is_dir():
-            raise click.UsageError("epss には --source <mirror clone ディレクトリ> が必要です")
+            raise click.UsageError(
+                "epss には --source <mirror clone ディレクトリ> が必要です"
+            )
         click.echo(pipeline.backfill_epss(cfg, source))
     else:
         if source is not None and not source.is_file():

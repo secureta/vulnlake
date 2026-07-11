@@ -21,7 +21,9 @@ def cfg(tmp_path):
 def _attach(cfg):
     con = duckdb.connect()
     con.execute("INSTALL ducklake; LOAD ducklake;")
-    con.execute(f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)")
+    con.execute(
+        f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)"
+    )
     return con
 
 
@@ -48,7 +50,8 @@ def test_backfill_cve_from_local_zip(cfg, tmp_path):
     assert con.execute("SELECT count(*) FROM frozen.cve").fetchone()[0] == 3
     # 年ファイル内は cve ソート
     rows = con.execute(
-        f"SELECT cve FROM read_parquet('{cfg.local_dir / 'cve' / 'year=2021' / 'cve-2021.parquet'}')"
+        "SELECT cve FROM read_parquet(?)",
+        [str(cfg.local_dir / "cve" / "year=2021" / "cve-2021.parquet")],
     ).fetchall()
     assert [r[0] for r in rows] == ["CVE-2021-0001", "CVE-2021-44228"]
     # datasets view に cve のライセンスが載る
@@ -117,8 +120,11 @@ def test_update_cve_appends_only_newer_records(cfg, tmp_path, monkeypatch):
     pipeline.backfill_cve(cfg, source_zip=zp)
 
     updated = [
-        make_cve_record("CVE-2021-44228", date_updated="2026-07-10T03:00:00Z",
-                        description="Updated description."),
+        make_cve_record(
+            "CVE-2021-44228",
+            date_updated="2026-07-10T03:00:00Z",
+            description="Updated description.",
+        ),
         make_cve_record("CVE-2021-0001", date_updated="2024-01-01T00:00:00Z"),
         make_cve_record("CVE-2024-1234", date_updated="2026-07-01T00:00:00Z"),
     ]
@@ -126,8 +132,13 @@ def test_update_cve_appends_only_newer_records(cfg, tmp_path, monkeypatch):
 
     msg = pipeline.update_cve(cfg)
     assert msg == "published 2026-07-11 (1 records, 0 bad)"
-    assert (cfg.local_dir / "cve" / "updates" / "year=2026"
-            / "cve-updates-2026-07-11.parquet").exists()
+    assert (
+        cfg.local_dir
+        / "cve"
+        / "updates"
+        / "year=2026"
+        / "cve-updates-2026-07-11.parquet"
+    ).exists()
 
     # 同日 baseline の再実行は skip
     assert pipeline.update_cve(cfg) == "already-registered 2026-07-11"

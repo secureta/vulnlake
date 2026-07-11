@@ -14,7 +14,7 @@ import re
 import shutil
 import zipfile
 from collections.abc import Iterator
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
@@ -78,7 +78,7 @@ def _ts(value) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
     return dt
 
 
@@ -92,9 +92,13 @@ def _first_en(entries) -> str | None:
     return entries[0].get("value")
 
 
-def _best_cvss(containers: dict) -> tuple[float | None, str | None, str | None, str | None]:
+def _best_cvss(
+    containers: dict,
+) -> tuple[float | None, str | None, str | None, str | None]:
     """CNA 優先・バージョン降順で最良の CVSS を1つ採択する。"""
-    for container in (containers.get("cna") or {},) + tuple(containers.get("adp") or ()):
+    for container in (containers.get("cna") or {},) + tuple(
+        containers.get("adp") or ()
+    ):
         for key in _CVSS_KEYS:
             for metric in container.get("metrics") or []:
                 m = metric.get(key)
@@ -175,7 +179,9 @@ def write_parquet(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path, compression="zstd")
 
 
-RELEASES_LATEST_URL = "https://api.github.com/repos/CVEProject/cvelistV5/releases/latest"
+RELEASES_LATEST_URL = (
+    "https://api.github.com/repos/CVEProject/cvelistV5/releases/latest"
+)
 _BASELINE_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})_all_CVEs_at_midnight\.zip\.zip$")
 _RECORD_NAME = re.compile(r"CVE-(\d{4})-\d{4,}\.json$")
 
@@ -186,8 +192,9 @@ def latest_baseline() -> tuple[date, str]:
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"  # API レート制限の回避 (任意)
-    resp = httpx.get(RELEASES_LATEST_URL, headers=headers,
-                     follow_redirects=True, timeout=60)
+    resp = httpx.get(
+        RELEASES_LATEST_URL, headers=headers, follow_redirects=True, timeout=60
+    )
     resp.raise_for_status()
     for asset in resp.json().get("assets", []):
         m = _BASELINE_NAME.match(asset.get("name", ""))

@@ -46,8 +46,12 @@ def make_cve_record(
     rejected_reasons: list[str] | None = None,
 ) -> dict:
     """CVE JSON 5.x のレコード構造を模した dict を作る。"""
-    meta: dict = {"cveId": cve_id, "assignerOrgId": "org-x",
-                  "assignerShortName": assigner, "state": state}
+    meta: dict = {
+        "cveId": cve_id,
+        "assignerOrgId": "org-x",
+        "assignerShortName": assigner,
+        "state": state,
+    }
     if date_published:
         meta["datePublished"] = date_published
     if date_reserved:
@@ -67,20 +71,28 @@ def make_cve_record(
         cna["metrics"] = cna_metrics
     if cwes:
         cna["problemTypes"] = [
-            {"descriptions": [
-                {"type": "CWE", "lang": "en", "description": c, "cweId": c}
-            ]}
+            {
+                "descriptions": [
+                    {"type": "CWE", "lang": "en", "description": c, "cweId": c}
+                ]
+            }
             for c in cwes
         ]
     containers: dict = {"cna": cna}
     if adp_metrics:
-        containers["adp"] = [{
-            "title": "CISA ADP Vulnrichment",
-            "providerMetadata": {"orgId": "org-y"},
-            "metrics": adp_metrics,
-        }]
-    return {"dataType": "CVE_RECORD", "dataVersion": "5.1",
-            "cveMetadata": meta, "containers": containers}
+        containers["adp"] = [
+            {
+                "title": "CISA ADP Vulnrichment",
+                "providerMetadata": {"orgId": "org-y"},
+                "metrics": adp_metrics,
+            }
+        ]
+    return {
+        "dataType": "CVE_RECORD",
+        "dataVersion": "5.1",
+        "cveMetadata": meta,
+        "containers": containers,
+    }
 
 
 def make_baseline_zip(path: Path, records: list[dict], *, nested: bool = True) -> None:
