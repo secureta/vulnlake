@@ -59,6 +59,29 @@ class Lake:
                 raw VARCHAR
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.ghsa_history (
+                ghsa VARCHAR,
+                cve VARCHAR,
+                summary VARCHAR,
+                severity VARCHAR,
+                cvss DOUBLE,
+                cvss_version VARCHAR,
+                cvss_vector VARCHAR,
+                cwe VARCHAR[],
+                affected STRUCT(
+                    ecosystem VARCHAR,
+                    package VARCHAR,
+                    introduced VARCHAR,
+                    fixed VARCHAR,
+                    last_affected VARCHAR
+                )[],
+                published TIMESTAMP,
+                modified TIMESTAMP,
+                withdrawn TIMESTAMP,
+                raw VARCHAR
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -90,6 +113,22 @@ class Lake:
             f"CREATE OR REPLACE VIEW {self.ALIAS}.cve AS "  # noqa: S608
             f"SELECT * FROM {self.ALIAS}.cve_history "
             f"QUALIFY row_number() OVER (PARTITION BY cve ORDER BY date_updated DESC) = 1"
+        )
+
+    def max_ghsa_modified(self):
+        """ghsa_history の最新 modified (空なら None)。日次差分の判定に使う。"""
+        return self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT max(modified) FROM {self.ALIAS}.ghsa_history"  # noqa: S608
+        ).fetchone()[0]
+
+    def refresh_ghsa_view(self) -> None:
+        """GHSA ごとに modified 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.ghsa AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.ghsa_history "
+            f"QUALIFY row_number() OVER (PARTITION BY ghsa ORDER BY modified DESC) = 1"
         )
 
     def add_file(self, table: str, path: str) -> bool:
