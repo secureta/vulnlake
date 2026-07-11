@@ -8,20 +8,29 @@ Currently included: **EPSS** (full daily history since 2021-04-14).
 ```sql
 -- DuckDB 1.5.2+
 INSTALL ducklake;
-ATTACH 'ducklake:https://<your-public-url>/vlake.ducklake' AS vlake;
+INSTALL httpfs;
+ATTACH 'ducklake:https://vlake.reta.work/vlake.ducklake' AS vlake;
 SELECT * FROM vlake.epss WHERE cve = 'CVE-2021-44228' ORDER BY date;
 SELECT * FROM vlake.datasets;  -- data sources & licenses
+```
+
+```text
+┌────────────────┬─────────┬────────────┬────────────┬───────────────┐
+│      cve       │  epss   │ percentile │    date    │ model_version │
+├────────────────┼─────────┼────────────┼────────────┼───────────────┤
+│ CVE-2021-44228 │ 0.99999 │        1.0 │ 2026-07-10 │ v2026.06.15   │
+└────────────────┴─────────┴────────────┴────────────┴───────────────┘
 ```
 
 Prefer plain Parquet? The same files are directly readable:
 
 ```sql
-SELECT * FROM read_parquet('https://<your-public-url>/epss/year=2026/*.parquet');
+SELECT * FROM read_parquet('https://vlake.reta.work/epss/year=2026/*.parquet');
 ```
 
 ```python
 import polars as pl
-pl.read_parquet("https://<your-public-url>/epss/year=2026/epss-2026-07-10.parquet")
+pl.read_parquet("https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet")
 ```
 
 ## Schema
