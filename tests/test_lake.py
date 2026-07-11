@@ -58,8 +58,12 @@ def _make_cve_parquet(tmp_path: Path, cve_id: str, updated: str, name: str) -> P
 
 def test_cve_history_and_latest_view(tmp_path):
     catalog = tmp_path / "vlake.ducklake"
-    old = _make_cve_parquet(tmp_path, "CVE-2021-0001", "2025-01-01T00:00:00Z", "a.parquet")
-    new = _make_cve_parquet(tmp_path, "CVE-2021-0001", "2026-01-01T00:00:00Z", "b.parquet")
+    old = _make_cve_parquet(
+        tmp_path, "CVE-2021-0001", "2025-01-01T00:00:00Z", "a.parquet"
+    )
+    new = _make_cve_parquet(
+        tmp_path, "CVE-2021-0001", "2026-01-01T00:00:00Z", "b.parquet"
+    )
 
     lake = Lake(catalog, data_path=str(tmp_path / "unused"))
     lake.ensure_tables()
@@ -82,7 +86,9 @@ def test_cve_history_and_latest_view(tmp_path):
 def test_registered_paths_scoped_by_table(tmp_path):
     catalog = tmp_path / "vlake.ducklake"
     epss_pq = _make_parquet(tmp_path, date(2026, 7, 10))
-    cve_pq = _make_cve_parquet(tmp_path, "CVE-2021-0001", "2026-01-01T00:00:00Z", "c.parquet")
+    cve_pq = _make_cve_parquet(
+        tmp_path, "CVE-2021-0001", "2026-01-01T00:00:00Z", "c.parquet"
+    )
 
     lake = Lake(catalog, data_path=str(tmp_path / "unused"))
     lake.ensure_tables()
