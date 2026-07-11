@@ -80,10 +80,11 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
 
     report = pipeline.verify(cfg)
     assert report["ok"] is True
-    assert report["files_in_storage"] == report["files_in_catalog"] == 2
-    assert report["row_count"] == 3
-    assert report["min_date"] == date(2021, 4, 14)
-    assert report["max_date"] == date(2026, 7, 10)
+    epss_rep = report["datasets"]["epss"]
+    assert epss_rep["files_in_storage"] == epss_rep["files_in_catalog"] == 2
+    assert epss_rep["row_count"] == 3
+    assert epss_rep["min_date"] == date(2021, 4, 14)
+    assert epss_rep["max_date"] == date(2026, 7, 10)
 
 
 def test_backfill_consolidates_closed_years(cfg, tmp_path):
@@ -129,10 +130,11 @@ def test_backfill_consolidates_closed_years(cfg, tmp_path):
 
     report = pipeline.verify(cfg)
     assert report["ok"] is True
-    assert report["files_in_storage"] == report["files_in_catalog"] == 4
-    assert report["row_count"] == 6
-    assert report["min_date"] == date(2021, 4, 14)
-    assert report["max_date"] == date(2023, 1, 6)
+    epss_rep = report["datasets"]["epss"]
+    assert epss_rep["files_in_storage"] == epss_rep["files_in_catalog"] == 4
+    assert epss_rep["row_count"] == 6
+    assert epss_rep["min_date"] == date(2021, 4, 14)
+    assert epss_rep["max_date"] == date(2023, 1, 6)
 
     # 冪等: 再実行はすべて skip
     msg = pipeline.backfill_epss(cfg, src, today=date(2023, 6, 1))
@@ -150,10 +152,7 @@ def test_verify_without_catalog(cfg, monkeypatch):
     assert report["ok"] is False
     assert report["stale"] is False
     assert report["files_in_storage"] == 1
-    assert report["files_in_catalog"] is None
-    assert report["row_count"] is None
-    assert report["min_date"] is None
-    assert report["max_date"] is None
+    assert report["datasets"] == {}
     assert report["error"] == "catalog not found"
 
 
@@ -169,8 +168,9 @@ def test_verify_detects_untracked_file(cfg, monkeypatch):
 
     report = pipeline.verify(cfg)
     assert report["ok"] is False
-    assert report["files_in_storage"] == 2
-    assert report["files_in_catalog"] == 1
+    epss_rep = report["datasets"]["epss"]
+    assert epss_rep["files_in_storage"] == 2
+    assert epss_rep["files_in_catalog"] == 1
 
 
 def test_verify_staleness_flags_old_max_date(cfg, monkeypatch):
@@ -249,4 +249,4 @@ def test_backfill_skips_closed_year_with_daily_files(cfg, monkeypatch, tmp_path)
 
     report = pipeline.verify(cfg)
     assert report["ok"] is True
-    assert report["row_count"] == 1
+    assert report["datasets"]["epss"]["row_count"] == 1

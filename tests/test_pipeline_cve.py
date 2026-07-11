@@ -163,3 +163,72 @@ def test_update_cve_refuses_on_empty_table(cfg, tmp_path, monkeypatch):
     _patch_fetch(monkeypatch, tmp_path, _records(), date(2026, 7, 11))
     msg = pipeline.update_cve(cfg)
     assert msg == "refused: cve_history is empty; run backfill cve first"
+
+
+def test_verify_covers_cve(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(zp, _records())
+    pipeline.backfill_cve(cfg, source_zip=zp)
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True
+    assert report["stale"] is False
+    cve_rep = report["datasets"]["cve"]
+    assert cve_rep["files_in_storage"] == cve_rep["files_in_catalog"] == 2
+    assert cve_rep["row_count"] == 3
+    assert cve_rep["max_date"] == date(2026, 7, 1)
+    # epss 側は空でも ok
+    assert report["datasets"]["epss"]["ok"] is True
+    assert report["datasets"]["epss"]["files_in_storage"] == 0
+
+
+def test_verify_detects_cve_stray_file(cfg, tmp_path):
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(zp, [make_cve_record("CVE-2021-0001")])
+    pipeline.backfill_cve(cfg, source_zip=zp)
+
+    stray = cfg.local_dir / "cve" / "year=2099" / "cve-2099.parquet"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not parquet")
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert report["datasets"]["cve"]["ok"] is False
+    assert report["datasets"]["epss"]["ok"] is True
+
+
+def test_verify_cve_staleness(cfg, tmp_path):
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(
+        zp, [make_cve_record("CVE-2021-0001", date_updated="2024-01-01T00:00:00Z")]
+    )
+    pipeline.backfill_cve(cfg, source_zip=zp)
+
+    report = pipeline.verify(cfg, max_age_days=3)
+    assert report["datasets"]["cve"]["stale"] is True
+    assert report["stale"] is True
+    assert report["ok"] is True
+
+
+def test_rebuild_catalog_covers_both_datasets(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    from tests.conftest import make_epss_csv_gz
+    from vlake import epss
+
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(zp, _records())
+    pipeline.backfill_cve(cfg, source_zip=zp)
+    raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    pipeline.update_epss(cfg)
+
+    (cfg.local_dir / "vlake.ducklake").unlink()
+    assert pipeline.rebuild_catalog(cfg) == "rebuilt catalog with 3 files"
+
+    con = _attach(cfg)
+    assert con.execute("SELECT count(*) FROM frozen.epss").fetchone()[0] == 1
+    assert con.execute("SELECT count(*) FROM frozen.cve_history").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM frozen.cve").fetchone()[0] == 3
