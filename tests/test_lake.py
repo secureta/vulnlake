@@ -68,7 +68,7 @@ def test_datasets_view(tmp_path):
     lake.refresh_datasets_view([epss.LICENSE_INFO])  # 再実行しても壊れない
     rows = lake.query("SELECT name, attribution FROM lake.datasets")
     assert rows[0][0] == "epss"
-    assert "FIRST.org" in rows[0][1]
+    assert rows[0][1] == epss.LICENSE_INFO["attribution"]
     lake.close()
 
     con = duckdb.connect()
