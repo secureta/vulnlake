@@ -44,7 +44,8 @@ class Lake:
 
     def registered_paths(self) -> set[str]:
         rows = self.con.execute(
-            f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"
+            # META はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
         ).fetchall()
         return {r[0] for r in rows}
 
@@ -78,7 +79,8 @@ class Lake:
             for info in infos
         )
         self.con.execute(
-            f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "
+            # ALIAS/cols は固定、values は _q() でエスケープ済み
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "  # noqa: S608
             f"SELECT * FROM (VALUES {values}) AS t({', '.join(cols)})"
         )
 

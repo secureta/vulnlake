@@ -121,7 +121,8 @@ def test_backfill_consolidates_closed_years(cfg, tmp_path):
     # 年ファイル内は (cve, date) ソート
     con = duckdb.connect()
     rows = con.execute(
-        f"SELECT cve, date FROM read_parquet('{epss_dir / 'year=2021' / 'epss-2021.parquet'}')"
+        "SELECT cve, date FROM read_parquet(?)",
+        [str(epss_dir / "year=2021" / "epss-2021.parquet")],
     ).fetchall()
     assert len(rows) == 3
     assert rows == sorted(rows)
