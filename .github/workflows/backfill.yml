@@ -1,0 +1,32 @@
+name: backfill
+on:
+  workflow_dispatch:
+concurrency:
+  group: publish  # publish.yml と同一グループ: 日次 update とのカタログ差し替え競合を直列化
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: publish  # Secrets/Variables は publish Environment を再利用
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: git clone --depth 1 https://github.com/empiricalsec/epss_scores "$RUNNER_TEMP/epss_scores"
+      - run: uv run vlake backfill epss --source "$RUNNER_TEMP/epss_scores"
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+      - run: uv run vlake verify
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
