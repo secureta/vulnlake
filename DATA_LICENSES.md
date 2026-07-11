@@ -1,6 +1,6 @@
 # Data Licenses
 
-vlake のコードは Apache-2.0 (LICENSE 参照)。収録データのライセンスはデータセットごとに異なり、
+vulnlake のコードは Apache-2.0 (LICENSE 参照)。収録データのライセンスはデータセットごとに異なり、
 本ファイルとレイク内の `datasets` ビュー (`SELECT * FROM vlake.datasets`) に記載する。
 
 ## EPSS

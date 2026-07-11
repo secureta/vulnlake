@@ -1,4 +1,4 @@
-# vlake
+# vulnlake
 
 Security datasets published as a **frozen DuckLake** on S3-compatible storage.
 Currently included: **EPSS** (full daily history since 2021-04-14) and **CVE**
