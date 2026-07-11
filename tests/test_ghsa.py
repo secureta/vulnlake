@@ -69,6 +69,17 @@ def test_parse_record_broken_vector_keeps_vector_string():
     assert row["cvss_vector"] == "CVSS:3.1/broken"
 
 
+def test_parse_record_non_string_score_is_skipped():
+    # score が文字列でないエントリは採択しない (vector も格納しない)
+    rec = make_ghsa_record(
+        "GHSA-aaaa-bbbb-cccc",
+        severity=[{"type": "CVSS_V3", "score": 12345}],
+    )
+    row = ghsa.parse_record(json.dumps(rec).encode())
+    assert row is not None
+    assert (row["cvss"], row["cvss_version"], row["cvss_vector"]) == (None, None, None)
+
+
 def test_parse_record_multiple_ranges_and_no_ranges():
     rec = make_ghsa_record(
         "GHSA-aaaa-bbbb-cccc",

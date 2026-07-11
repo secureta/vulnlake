@@ -90,8 +90,8 @@ def _best_cvss(severity: list) -> tuple[str | None, float | None, str | None]:
     """severity 配列から CVSS_V4 > CVSS_V3 の優先で (vector, score, version) を採択。"""
     for kind in _CVSS_TYPES:
         for entry in severity:
-            if entry.get("type") == kind and entry.get("score"):
-                vector = entry["score"]
+            vector = entry.get("score")
+            if entry.get("type") == kind and vector and isinstance(vector, str):
                 score, version = _score_from_vector(vector)
                 return vector, score, version
     return None, None, None
