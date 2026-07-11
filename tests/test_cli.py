@@ -118,3 +118,53 @@ def test_backfill_epss_requires_source(monkeypatch, tmp_path):
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
     result = CliRunner().invoke(main, ["backfill", "epss"])
     assert result.exit_code != 0
+
+
+def test_update_ghsa_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline, "update_ghsa", lambda cfg: "published 2026-07-12 (5 records, 0 bad)"
+    )
+    result = CliRunner().invoke(main, ["update", "ghsa"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-12" in result.output
+
+
+def test_update_ghsa_refused_exits_nonzero(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_ghsa",
+        lambda cfg: "refused: ghsa_history is empty; run backfill ghsa first",
+    )
+    result = CliRunner().invoke(main, ["update", "ghsa"])
+    assert result.exit_code == 1
+    assert "refused" in result.output
+
+
+def test_update_ghsa_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "ghsa", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_ghsa_via_cli_with_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path / "bucket"))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from tests.conftest import make_ghsa_record, make_ghsa_tarball
+
+    tp = tmp_path / "advisory-database.tar.gz"
+    make_ghsa_tarball(
+        tp, [make_ghsa_record("GHSA-aaaa-bbbb-cccc", published="2021-01-01T00:00:00Z")]
+    )
+    result = CliRunner().invoke(main, ["backfill", "ghsa", "--source", str(tp)])
+    assert result.exit_code == 0, result.output
+    assert "backfilled 1 year files" in result.output

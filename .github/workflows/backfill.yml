@@ -5,7 +5,7 @@ on:
       dataset:
         description: "バックフィルするデータセット"
         type: choice
-        options: [all, epss, cve]
+        options: [all, epss, cve, ghsa]
         default: all
 permissions:
   contents: read  # checkout のみ。GITHUB_TOKEN の権限を最小化
@@ -24,9 +24,9 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - run: uv sync
       - run: git clone --depth 1 https://github.com/empiricalsec/epss_scores "$RUNNER_TEMP/epss_scores"
-        if: inputs.dataset != 'cve'
+        if: inputs.dataset == 'all' || inputs.dataset == 'epss'
       - run: uv run vlake backfill epss --source "$RUNNER_TEMP/epss_scores"
-        if: inputs.dataset != 'cve'
+        if: inputs.dataset == 'all' || inputs.dataset == 'epss'
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
           VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
@@ -35,7 +35,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
       - run: uv run vlake backfill cve
-        if: inputs.dataset != 'epss'
+        if: inputs.dataset == 'all' || inputs.dataset == 'cve'
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
           VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
@@ -44,6 +44,15 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           GITHUB_TOKEN: ${{ github.token }}  # Releases API のレート制限回避
+      - run: uv run vlake backfill ghsa
+        if: inputs.dataset == 'all' || inputs.dataset == 'ghsa'
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
       - run: uv run vlake verify
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}

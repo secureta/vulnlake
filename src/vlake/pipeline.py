@@ -9,12 +9,12 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss
+from . import cvelist, epss, ghsa
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -65,8 +65,11 @@ def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
 
 
 def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
-    lake.refresh_datasets_view([epss.LICENSE_INFO, cvelist.LICENSE_INFO])
+    lake.refresh_datasets_view(
+        [epss.LICENSE_INFO, cvelist.LICENSE_INFO, ghsa.LICENSE_INFO]
+    )
     lake.refresh_cve_view()
+    lake.refresh_ghsa_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -306,10 +309,97 @@ def backfill_cve(cfg: Config, source_zip: Path | None = None) -> str:
     return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
 
 
+def update_ghsa(cfg: Config, today: date | None = None) -> str:
+    """最新 tarball から、カタログの max(modified) より新しいレコードを追記する。
+
+    差分抽出は日時比較のみなので、何日停止しても次の1回で完全回復する。
+    tarball には日付ラベルが無いため、日次キーには実行日 (UTC) を使う。
+    today はテスト用の注入点 (省略時は実日付)。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = ghsa.key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            max_modified = lake.max_ghsa_modified()
+            if max_modified is None:
+                return "refused: ghsa_history is empty; run backfill ghsa first"
+            tar_path = workdir / "advisory-database.tar.gz"
+            ghsa.download(ghsa.TARBALL_URL, tar_path)
+            rows, bad = [], 0
+            for raw in ghsa.iter_reviewed(tar_path):
+                row = ghsa.parse_record(raw)
+                if row is None:
+                    bad += 1
+                elif row["modified"] > max_modified:
+                    rows.append(row)
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            ghsa.write_parquet(ghsa.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"ghsa updates {run_date} ({len(rows)} records)")
+            lake.add_file("ghsa_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records, {bad} bad)"
+
+
+def backfill_ghsa(cfg: Config, source_tar: Path | None = None) -> str:
+    """リポジトリ tarball (省略時は最新をダウンロード) から全 advisory を取り込む。
+
+    github-reviewed のみ、published 年ごとに1ファイル (ghsa ソート)。
+    登録済みの年は skip (冪等)。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        if source_tar is None:
+            source_tar = workdir / "advisory-database.tar.gz"
+            print("  advisory-database tarball をダウンロード中...")
+            ghsa.download(ghsa.TARBALL_URL, source_tar)
+        by_year: dict[int, list[dict]] = {}
+        bad = 0
+        for raw in ghsa.iter_reviewed(source_tar):
+            row = ghsa.parse_record(raw)
+            if row is None:
+                bad += 1
+                continue
+            year = (row["published"] or row["modified"]).year
+            by_year.setdefault(year, []).append(row)
+        lake, catalog = _open_lake(storage, workdir)
+        added = skipped = 0
+        try:
+            registered = lake.registered_paths()
+            for year in sorted(by_year):
+                key = ghsa.key_for_year(year)
+                if storage.url(key) in registered:
+                    skipped += 1
+                    continue
+                rows = by_year[year]
+                parquet = workdir / f"ghsa-{year}.parquet"
+                ghsa.write_parquet(ghsa.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"ghsa {year} backfill ({len(rows)} records)")
+                lake.add_file("ghsa_history", storage.url(key))
+                parquet.unlink()
+                added += 1
+                print(f"  {year}: {len(rows)} 件")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
-    tables = {"epss/": "epss", "cve/": "cve_history"}
+    tables = {"epss/": "epss", "cve/": "cve_history", "ghsa/": "ghsa_history"}
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
         (k, table)
@@ -336,6 +426,7 @@ def rebuild_catalog(cfg: Config) -> str:
 
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -370,20 +461,30 @@ def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict
     }
 
 
-def _verify_cve(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
-    """cve: パス集合の一致 + max(date_updated) が日次キーの日付に追随していること。
+def _verify_history(
+    storage: Storage,
+    lake: Lake,
+    max_age_days: int | None,
+    *,
+    prefix: str,
+    table: str,
+    ts_column: str,
+    update_key_re: re.Pattern,
+) -> dict:
+    """履歴型データセット (cve/ghsa) 共通: パス集合の一致 +
+    max(ts_column) が日次キーの日付に追随していること。
 
-    backfill 年ファイルは ID 年であって date_updated と無関係なので min 側の
-    検証はしない。baseline は前日までの更新を含む断面なので、日次キーの日付より
-    max(date_updated) が1日古いところまでは正常とみなす。
+    backfill 年ファイルは ID 年 / published 年であって ts_column と無関係なので
+    min 側の検証はしない。スナップショットは前日までの更新を含む断面なので、
+    日次キーの日付より max(ts_column) が1日古いところまでは正常とみなす。
     """
-    keys = [k for k in storage.list("cve/") if k.endswith(".parquet")]
+    keys = [k for k in storage.list(prefix) if k.endswith(".parquet")]
     storage_paths = {storage.url(k) for k in keys}
-    catalog_paths = lake.registered_paths("cve_history")
+    catalog_paths = lake.registered_paths(table)
     try:
         row_count, min_ts, max_ts = lake.query(
-            # ALIAS はクラス定数の固定識別子
-            f"SELECT count(*), min(date_updated), max(date_updated) FROM {lake.ALIAS}.cve_history"  # noqa: S608
+            # ALIAS はクラス定数、table/ts_column は呼び出し側の固定文字列
+            f"SELECT count(*), min({ts_column}), max({ts_column}) FROM {lake.ALIAS}.{table}"  # noqa: S608
         )[0]
     except duckdb.Error:
         return {
@@ -397,9 +498,7 @@ def _verify_cve(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
         }
     ok = storage_paths == catalog_paths
     update_dates = [
-        date.fromisoformat(m.group(1))
-        for k in keys
-        if (m := _UPDATE_KEY_DATE.search(k))
+        date.fromisoformat(m.group(1)) for k in keys if (m := update_key_re.search(k))
     ]
     if update_dates:
         ok = (
@@ -450,7 +549,24 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
         try:
             reports = {
                 "epss": _verify_epss(storage, lake, max_age_days),
-                "cve": _verify_cve(storage, lake, max_age_days),
+                "cve": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="cve/",
+                    table="cve_history",
+                    ts_column="date_updated",
+                    update_key_re=_UPDATE_KEY_DATE,
+                ),
+                "ghsa": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="ghsa/",
+                    table="ghsa_history",
+                    ts_column="modified",
+                    update_key_re=_GHSA_UPDATE_KEY_DATE,
+                ),
             }
         finally:
             lake.close()

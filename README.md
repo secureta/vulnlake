@@ -1,8 +1,9 @@
 # vulnlake
 
 Security datasets published as a **frozen DuckLake** on S3-compatible storage.
-Currently included: **EPSS** (full daily history since 2021-04-14) and **CVE**
-(CVE List V5, full record history of changes).
+Currently included: **EPSS** (full daily history since 2021-04-14), **CVE**
+(CVE List V5, full record history of changes), and **GHSA** (GitHub Advisory
+Database, github-reviewed advisories with package/version ranges).
 
 ## Query it
 
@@ -14,6 +15,9 @@ ATTACH 'ducklake:https://vlake.reta.work/vlake.ducklake' AS vlake;
 SELECT * FROM vlake.epss WHERE cve = 'CVE-2021-44228' ORDER BY date;
 SELECT cve, title, cvss, cvss_severity FROM vlake.cve WHERE cve = 'CVE-2021-44228';
 SELECT * FROM vlake.cve_history WHERE cve = 'CVE-2021-44228' ORDER BY date_updated;
+SELECT ghsa, summary, severity FROM vlake.ghsa WHERE cve = 'CVE-2021-44228';
+SELECT ghsa, a.package, a.introduced, a.fixed
+FROM vlake.ghsa, UNNEST(affected) AS t(a) WHERE a.ecosystem = 'npm';
 SELECT * FROM vlake.datasets;  -- data sources & licenses
 ```
 
@@ -58,6 +62,18 @@ CVE-ID year, sorted by cve) plus
 `cve/updates/year=YYYY/cve-updates-YYYY-MM-DD.parquet` (daily deltas of
 records whose `dateUpdated` advanced past the catalog's max).
 
+`ghsa_history(ghsa, cve, summary, severity, cvss, cvss_version, cvss_vector,
+cwe VARCHAR[], affected STRUCT(ecosystem, package, introduced, fixed,
+last_affected)[], published, modified, withdrawn, raw)` — append-only change
+history of github-reviewed advisories from the GitHub Advisory Database.
+The `ghsa` view returns the latest row per GHSA ID (`raw` holds the full
+OSV JSON record; numeric `cvss` is computed from the vector).
+
+Layout: `ghsa/year=YYYY/ghsa-YYYY.parquet` (backfill snapshot, partitioned by
+published year, sorted by ghsa) plus
+`ghsa/updates/year=YYYY/ghsa-updates-YYYY-MM-DD.parquet` (daily deltas of
+records whose `modified` advanced past the catalog's max; dated by run date).
+
 ## Build your own lake
 
 ```bash
@@ -72,16 +88,18 @@ export AWS_DEFAULT_REGION=auto   # `auto` works for R2; use a real region for AW
 git clone --depth 1 https://github.com/empiricalsec/epss_scores /tmp/epss_scores
 uv run vlake backfill epss --source /tmp/epss_scores
 uv run vlake backfill cve   # baseline zip (~550MB) を自動ダウンロード
+uv run vlake backfill ghsa  # リポジトリ tarball を自動ダウンロード
 
 # daily
 uv run vlake update epss
 uv run vlake update cve
+uv run vlake update ghsa
 uv run vlake verify
 ```
 
 No local machine needed for the backfill: after configuring the `publish`
 Environment (below), open the **Actions** tab → **backfill** → **Run
-workflow** and pick a **dataset** (`all` / `epss` / `cve`). For epss the job
+workflow** and pick a **dataset** (`all` / `epss` / `cve` / `ghsa`). For epss the job
 clones the mirror on the runner, consolidates closed years into per-year
 Parquet files, and ingests the current year day by day; for cve it downloads
 the latest cvelistV5 baseline zip (~550MB) and ingests it (roughly an hour
@@ -96,8 +114,8 @@ the recovery; the published catalog is never left in a broken state.
 Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variables.
 
 The included GitHub Actions workflow (`.github/workflows/publish.yml`) runs
-`vlake update epss` and `vlake update cve` daily at 14:30 UTC (EPSS publishes
-around 13:30 UTC; the cvelistV5 baseline is a 00:00 UTC snapshot).
+`vlake update epss`, `vlake update cve`, `vlake update ghsa` daily at 14:30 UTC
+(EPSS publishes around 13:30 UTC; the cvelistV5 baseline is a 00:00 UTC snapshot).
 Fork the repo and create a **`publish` Environment** (Settings → Environments →
 New environment → name it `publish`) — the workflow's `environment: publish` line
 only resolves Secrets/Variables stored there. Configure inside that Environment:
@@ -132,6 +150,13 @@ See [DATA_LICENSES.md](DATA_LICENSES.md) and the in-lake `datasets` view.
 CVE data is redistributed under the CVE Terms of Use (SPDX: `cve-tou`) —
 https://www.cve.org/Legal/TermsOfUse. CVE® is a registered trademark of The
 MITRE Corporation. CVE Records: Copyright © 1999-2026 The MITRE Corporation.
+See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+
+GHSA data is the GitHub Advisory Database — © GitHub, Inc.
+(https://github.com/github/advisory-database), licensed under CC-BY 4.0 —
+https://creativecommons.org/licenses/by/4.0/. This project redistributes it
+with modifications (OSV JSON converted to Parquet); the original record is
+kept in the `raw` column. Not endorsed or certified by GitHub, Inc.
 See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
 
 ## Code license

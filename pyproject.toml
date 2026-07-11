@@ -11,6 +11,7 @@ dependencies = [
     "boto3>=1.43.46",
     "httpx>=0.28.1",
     "click>=8.4.2",
+    "cvss>=3.6",
 ]
 
 [project.scripts]

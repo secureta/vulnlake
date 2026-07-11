@@ -1,6 +1,7 @@
 import gzip
 import io
 import json
+import tarfile
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -109,3 +110,86 @@ def make_baseline_zip(path: Path, records: list[dict], *, nested: bool = True) -
             outer.writestr("cves.zip", inner.getvalue())
     else:
         path.write_bytes(inner.getvalue())
+
+
+def make_ghsa_record(
+    ghsa_id: str,
+    *,
+    aliases: tuple[str, ...] = ("CVE-2021-44228",),
+    summary: str | None = "Sample advisory summary",
+    severity_label: str | None = "CRITICAL",
+    severity: list | None = None,
+    cwe_ids: tuple[str, ...] = ("CWE-502",),
+    affected: list | None = None,
+    published: str | None = "2021-12-10T00:40:56Z",
+    modified: str | None = "2026-07-10T12:00:00Z",
+    withdrawn: str | None = None,
+) -> dict:
+    """GitHub Advisory Database の OSV レコード構造を模した dict を作る。
+
+    severity=None ならデフォルトで CVSS_V3 の 10.0 ベクタを入れる。
+    severity=[] で severity 無しになる。affected も同様。
+    """
+    if severity is None:
+        severity = [
+            {
+                "type": "CVSS_V3",
+                "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            }
+        ]
+    if affected is None:
+        affected = [
+            {
+                "package": {
+                    "ecosystem": "Maven",
+                    "name": "org.apache.logging.log4j:log4j-core",
+                },
+                "ranges": [
+                    {
+                        "type": "ECOSYSTEM",
+                        "events": [{"introduced": "2.0-beta9"}, {"fixed": "2.3.1"}],
+                    }
+                ],
+            }
+        ]
+    rec: dict = {
+        "schema_version": "1.4.0",
+        "id": ghsa_id,
+        "aliases": list(aliases),
+        "severity": severity,
+        "affected": affected,
+        "database_specific": {
+            "cwe_ids": list(cwe_ids),
+            "severity": severity_label,
+            "github_reviewed": True,
+        },
+    }
+    if summary:
+        rec["summary"] = summary
+        rec["details"] = summary + " (details)"
+    if published:
+        rec["published"] = published
+    if modified:
+        rec["modified"] = modified
+    if withdrawn:
+        rec["withdrawn"] = withdrawn
+    return rec
+
+
+def make_ghsa_tarball(
+    path: Path, records: list[dict], *, unreviewed: list[dict] = ()
+) -> None:
+    """github/advisory-database の main tarball を模す (top dir + OSV JSON)。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w:gz") as tf:
+        for area, recs in (("github-reviewed", records), ("unreviewed", unreviewed)):
+            for rec in recs:
+                yyyy, mm = rec["published"][0:4], rec["published"][5:7]
+                name = (
+                    f"advisory-database-main/advisories/{area}/"
+                    f"{yyyy}/{mm}/{rec['id']}/{rec['id']}.json"
+                )
+                data = json.dumps(rec).encode()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
