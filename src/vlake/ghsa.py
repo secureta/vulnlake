@@ -9,9 +9,13 @@ Parquet に変換して再配布する (変更あり)。
 from __future__ import annotations
 
 import json
+import re
+import tarfile
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
+import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
 from cvss import CVSS3, CVSS4
@@ -184,3 +188,32 @@ def key_for_update(d: date) -> str:
 
 def write_parquet(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path, compression="zstd")
+
+
+TARBALL_URL = (
+    "https://codeload.github.com/github/advisory-database/tar.gz/refs/heads/main"
+)
+_REVIEWED = re.compile(r"/advisories/github-reviewed/.+\.json$")
+
+
+def download(url: str, dest: Path) -> None:
+    """リポジトリ tarball をストリーミングでダウンロードする。"""
+    with httpx.stream("GET", url, follow_redirects=True, timeout=600) as resp:
+        resp.raise_for_status()
+        with dest.open("wb") as f:
+            for chunk in resp.iter_bytes():
+                f.write(chunk)
+
+
+def iter_reviewed(tar_path: Path) -> Iterator[bytes]:
+    """tarball 内の github-reviewed 配下の JSON を逐次 yield する。
+
+    ストリーミングモード ("r|gz") で逐次読みし、unreviewed 配下は
+    エントリ名だけ見て読み飛ばす (展開しない)。
+    """
+    with tarfile.open(tar_path, "r|gz") as tf:
+        for member in tf:
+            if member.isfile() and _REVIEWED.search(member.name):
+                f = tf.extractfile(member)
+                if f is not None:
+                    yield f.read()

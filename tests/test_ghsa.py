@@ -174,3 +174,50 @@ def test_keys():
     assert ghsa.key_for_update(date(2026, 7, 12)) == (
         "ghsa/updates/year=2026/ghsa-updates-2026-07-12.parquet"
     )
+
+
+def test_iter_reviewed_skips_unreviewed(tmp_path):
+    from tests.conftest import make_ghsa_tarball
+
+    tp = tmp_path / "advisory-database.tar.gz"
+    make_ghsa_tarball(
+        tp,
+        [
+            make_ghsa_record("GHSA-aaaa-bbbb-cccc", published="2021-12-10T00:40:56Z"),
+            make_ghsa_record("GHSA-dddd-eeee-ffff", published="2024-03-01T00:00:00Z"),
+        ],
+        unreviewed=[
+            make_ghsa_record("GHSA-uuuu-uuuu-uuuu", published="2024-03-01T00:00:00Z")
+        ],
+    )
+    ids = []
+    for raw in ghsa.iter_reviewed(tp):
+        ids.append(json.loads(raw)["id"])
+    assert sorted(ids) == ["GHSA-aaaa-bbbb-cccc", "GHSA-dddd-eeee-ffff"]
+
+
+def test_download_streams_to_dest(tmp_path, monkeypatch):
+    # cvelist.download と同型の httpx ストリーミング。互換の smoke テストのみ
+    import httpx
+
+    class FakeStream:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self):
+            yield b"tar"
+            yield b"ball"
+
+    monkeypatch.setattr(httpx, "stream", lambda *a, **kw: FakeStream())
+    dest = tmp_path / "out.tar.gz"
+    ghsa.download("https://x/tarball", dest)
+    assert dest.read_bytes() == b"tarball"
