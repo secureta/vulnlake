@@ -1,22 +1,22 @@
-name: publish
+name: backfill
 on:
-  schedule:
-    - cron: "30 14 * * *"  # EPSS 更新 (~13:30 UTC) の後
   workflow_dispatch:
 permissions:
-  contents: read  # checkout のみ。GITHUB_TOKEN の権限を最小化 (書き込み先は S3 のみ)
+  contents: read  # checkout のみ。GITHUB_TOKEN の権限を最小化
 concurrency:
-  group: publish
+  group: publish  # publish.yml と同一グループ: 日次 update とのカタログ差し替え競合を直列化
   cancel-in-progress: false
 jobs:
-  update:
+  backfill:
     runs-on: ubuntu-latest
-    environment: publish  # Secrets/Variables はこの Environment に置く (ブランチ保護付き)
+    timeout-minutes: 360
+    environment: publish  # Secrets/Variables は publish Environment を再利用
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
       - run: uv sync
-      - run: uv run vlake update epss
+      - run: git clone --depth 1 https://github.com/empiricalsec/epss_scores "$RUNNER_TEMP/epss_scores"
+      - run: uv run vlake backfill epss --source "$RUNNER_TEMP/epss_scores"
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
           VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
@@ -24,7 +24,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
-      - run: uv run vlake verify --max-age-days 3
+      - run: uv run vlake verify
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
           VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}

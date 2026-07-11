@@ -95,6 +95,11 @@ def key_for(d: date) -> str:
     return f"epss/year={d.year}/epss-{d.isoformat()}.parquet"
 
 
+def year_key_for(year: int) -> str:
+    """確定した過去年を集約した年ファイルのキー。"""
+    return f"epss/year={year}/epss-{year}.parquet"
+
+
 def write_parquet(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path, compression="zstd")
 

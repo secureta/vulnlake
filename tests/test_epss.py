@@ -67,6 +67,10 @@ def test_write_parquet_roundtrip(tmp_path):
     assert back.num_rows == 1
 
 
+def test_year_key_for():
+    assert epss.year_key_for(2021) == "epss/year=2021/epss-2021.parquet"
+
+
 def test_license_info_complete():
     for key in ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer"):
         assert epss.LICENSE_INFO[key]
