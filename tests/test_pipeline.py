@@ -213,3 +213,32 @@ def test_years_from_keys():
         "epss/other.txt",
     ]
     assert pipeline._years_from_keys(keys) == {2021, 2026}
+
+
+def test_backfill_skips_closed_year_with_daily_files(cfg, monkeypatch, tmp_path):
+    """日次で登録済みの確定年は skip され、年ファイルによる二重登録が起きないこと。"""
+    raw = make_epss_csv_gz(
+        date(2021, 4, 14),
+        [("CVE-2020-5902", 0.65117)],
+        with_comment=False,
+        with_percentile=False,
+    )
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg, date(2021, 4, 14)) == "published 2021-04-14"
+
+    src = tmp_path / "mirror"
+    (src / "2021").mkdir(parents=True)
+    (src / "2021" / "epss_scores-2021-04-14.csv.gz").write_bytes(raw)
+    (src / "2021" / "epss_scores-2021-04-15.csv.gz").write_bytes(
+        make_epss_csv_gz(
+            date(2021, 4, 15), [("CVE-2020-5902", 0.66, 0.99)], model_version="v1"
+        )
+    )
+
+    msg = pipeline.backfill_epss(cfg, src, today=date(2026, 7, 11))
+    assert msg == "backfilled 0 year files, 0 daily files (skipped 1 years, 0 daily)"
+    assert not (cfg.local_dir / "epss" / "year=2021" / "epss-2021.parquet").exists()
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True
+    assert report["row_count"] == 1
