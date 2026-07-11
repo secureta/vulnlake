@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import epss
+from . import cvelist, epss
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -60,12 +60,13 @@ def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
     catalog = workdir / CATALOG_KEY
     existed = storage.get(CATALOG_KEY, catalog)
     lake = Lake(catalog, data_path=None if existed else storage.url("unused"))
-    lake.ensure_epss_table()
+    lake.ensure_tables()
     return lake, catalog
 
 
 def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
-    lake.refresh_datasets_view([epss.LICENSE_INFO])
+    lake.refresh_datasets_view([epss.LICENSE_INFO, cvelist.LICENSE_INFO])
+    lake.refresh_cve_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -224,7 +225,7 @@ def rebuild_catalog(cfg: Config) -> str:
         catalog = workdir / CATALOG_KEY
         lake = Lake(catalog, data_path=storage.url("unused"))
         try:
-            lake.ensure_epss_table()
+            lake.ensure_tables()
             for key in keys:
                 lake.add_file("epss", storage.url(key))
             _publish_catalog(storage, lake, catalog)

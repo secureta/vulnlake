@@ -31,7 +31,7 @@ class Lake:
             f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}"
         )
 
-    def ensure_epss_table(self) -> None:
+    def ensure_tables(self) -> None:
         self.con.execute(
             f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.epss (
                 cve VARCHAR,
@@ -41,13 +41,56 @@ class Lake:
                 model_version VARCHAR
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.cve_history (
+                cve VARCHAR,
+                state VARCHAR,
+                assigner VARCHAR,
+                title VARCHAR,
+                description VARCHAR,
+                cvss DOUBLE,
+                cvss_version VARCHAR,
+                cvss_severity VARCHAR,
+                cvss_vector VARCHAR,
+                cwe VARCHAR[],
+                date_published TIMESTAMP,
+                date_reserved TIMESTAMP,
+                date_updated TIMESTAMP,
+                raw VARCHAR
+            )"""
+        )
 
-    def registered_paths(self) -> set[str]:
-        rows = self.con.execute(
-            # META はクラス定数の固定識別子で外部入力は入らない
-            f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
-        ).fetchall()
+    def registered_paths(self, table: str | None = None) -> set[str]:
+        if table is None:
+            rows = self.con.execute(
+                # META はクラス定数の固定識別子で外部入力は入らない
+                f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
+            ).fetchall()
+        else:
+            rows = self.con.execute(
+                # META はクラス定数の固定識別子、table は _q() でエスケープ済み
+                f"""SELECT f.path FROM {self.META}.ducklake_data_file f
+                    JOIN {self.META}.ducklake_table t ON f.table_id = t.table_id
+                    WHERE f.end_snapshot IS NULL AND t.end_snapshot IS NULL
+                      AND t.table_name = '{_q(table)}'"""  # noqa: S608
+            ).fetchall()
         return {r[0] for r in rows}
+
+    def max_cve_date_updated(self):
+        """cve_history の最新 date_updated (空なら None)。日次差分の判定に使う。"""
+        return self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT max(date_updated) FROM {self.ALIAS}.cve_history"  # noqa: S608
+        ).fetchone()[0]
+
+    def refresh_cve_view(self) -> None:
+        """CVE ごとに date_updated 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.cve AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.cve_history "
+            f"QUALIFY row_number() OVER (PARTITION BY cve ORDER BY date_updated DESC) = 1"
+        )
 
     def add_file(self, table: str, path: str) -> bool:
         if path in self.registered_paths():
