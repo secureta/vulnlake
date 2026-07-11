@@ -1,9 +1,6 @@
-import vlake
-
-from pathlib import Path
-
 import pytest
 
+import vlake
 from vlake.config import Config
 
 
@@ -30,7 +27,12 @@ def test_from_env_s3(monkeypatch):
 
 
 def test_from_env_missing(monkeypatch):
-    for var in ("VLAKE_S3_BUCKET", "VLAKE_LOCAL_DIR", "VLAKE_PUBLIC_URL", "VLAKE_S3_ENDPOINT"):
+    for var in (
+        "VLAKE_S3_BUCKET",
+        "VLAKE_LOCAL_DIR",
+        "VLAKE_PUBLIC_URL",
+        "VLAKE_S3_ENDPOINT",
+    ):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(SystemExit):
         Config.from_env()

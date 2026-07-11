@@ -9,7 +9,9 @@ from vlake.lake import Lake
 
 
 def _make_parquet(tmp_path: Path, d: date) -> Path:
-    raw = make_epss_csv_gz(d, [("CVE-1999-0001", 0.1, 0.5), ("CVE-1999-0002", 0.2, 0.6)])
+    raw = make_epss_csv_gz(
+        d, [("CVE-1999-0001", 0.1, 0.5), ("CVE-1999-0002", 0.2, 0.6)]
+    )
     table, _, _ = epss.parse(raw, fallback_date=d)
     out = tmp_path / f"epss-{d.isoformat()}.parquet"
     epss.write_parquet(table, out)

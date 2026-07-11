@@ -1,5 +1,4 @@
 from datetime import date
-from pathlib import Path
 
 import duckdb
 import pytest
@@ -22,7 +21,9 @@ def cfg(tmp_path):
 def _attach(cfg):
     con = duckdb.connect()
     con.execute("INSTALL ducklake; LOAD ducklake;")
-    con.execute(f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)")
+    con.execute(
+        f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)"
+    )
     return con
 
 
@@ -88,10 +89,16 @@ def test_backfill_then_update_then_verify(cfg, monkeypatch, tmp_path):
 def test_backfill_consolidates_closed_years(cfg, tmp_path):
     src = tmp_path / "mirror"
     days = [
-        (date(2021, 4, 14), [("CVE-2020-5902", 0.65117)],
-         dict(with_comment=False, with_percentile=False)),
-        (date(2021, 4, 15), [("CVE-2020-5902", 0.66, 0.99), ("CVE-2020-0001", 0.01, 0.1)],
-         dict(model_version="v1")),
+        (
+            date(2021, 4, 14),
+            [("CVE-2020-5902", 0.65117)],
+            dict(with_comment=False, with_percentile=False),
+        ),
+        (
+            date(2021, 4, 15),
+            [("CVE-2020-5902", 0.66, 0.99), ("CVE-2020-0001", 0.01, 0.1)],
+            dict(model_version="v1"),
+        ),
         (date(2022, 1, 1), [("CVE-2020-5902", 0.7, 0.99)], dict(model_version="v2")),
         (date(2023, 1, 5), [("CVE-2020-5902", 0.8, 0.99)], dict(model_version="v3")),
         (date(2023, 1, 6), [("CVE-2020-5902", 0.81, 0.99)], dict(model_version="v3")),
@@ -114,7 +121,8 @@ def test_backfill_consolidates_closed_years(cfg, tmp_path):
     # 年ファイル内は (cve, date) ソート
     con = duckdb.connect()
     rows = con.execute(
-        f"SELECT cve, date FROM read_parquet('{epss_dir / 'year=2021' / 'epss-2021.parquet'}')"
+        "SELECT cve, date FROM read_parquet(?)",
+        [str(epss_dir / "year=2021" / "epss-2021.parquet")],
     ).fetchall()
     assert len(rows) == 3
     assert rows == sorted(rows)

@@ -17,8 +17,27 @@ dependencies = [
 vlake = "vlake.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9.1.1"]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.21",
+    "zizmor>=1.26.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12"]
 build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9", "F",  # デフォルト (pycodestyle/pyflakes)
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit (SAST)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # pytest では assert が正当

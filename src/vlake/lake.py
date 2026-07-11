@@ -27,7 +27,9 @@ class Lake:
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
         options = f" (DATA_PATH '{_q(data_path)}')" if data_path else ""
-        self.con.execute(f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}")
+        self.con.execute(
+            f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}"
+        )
 
     def ensure_epss_table(self) -> None:
         self.con.execute(
@@ -42,7 +44,8 @@ class Lake:
 
     def registered_paths(self) -> set[str]:
         rows = self.con.execute(
-            f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"
+            # META はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
         ).fetchall()
         return {r[0] for r in rows}
 
@@ -63,12 +66,21 @@ class Lake:
             pass  # 拡張のバージョンによっては未対応。注記は必須機能ではない
 
     def refresh_datasets_view(self, infos: list[dict]) -> None:
-        cols = ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer")
+        cols = (
+            "name",
+            "source_url",
+            "license_name",
+            "license_text",
+            "attribution",
+            "disclaimer",
+        )
         values = ", ".join(
-            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")" for info in infos
+            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")"
+            for info in infos
         )
         self.con.execute(
-            f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "
+            # ALIAS/cols は固定、values は _q() でエスケープ済み
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "  # noqa: S608
             f"SELECT * FROM (VALUES {values}) AS t({', '.join(cols)})"
         )
 

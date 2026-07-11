@@ -1,5 +1,4 @@
 from datetime import date
-from pathlib import Path
 
 import pyarrow.parquet as pq
 
@@ -72,6 +71,13 @@ def test_year_key_for():
 
 
 def test_license_info_complete():
-    for key in ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer"):
+    for key in (
+        "name",
+        "source_url",
+        "license_name",
+        "license_text",
+        "attribution",
+        "disclaimer",
+    ):
         assert epss.LICENSE_INFO[key]
     assert "not endorsed or certified by FIRST" in epss.LICENSE_INFO["disclaimer"]
