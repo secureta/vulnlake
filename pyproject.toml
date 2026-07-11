@@ -20,6 +20,7 @@ vlake = "vlake.cli:main"
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.15.21",
+    "zizmor>=1.26.1",
 ]
 
 [build-system]
