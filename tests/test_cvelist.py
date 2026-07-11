@@ -1,7 +1,5 @@
 import json
-import zipfile
 from datetime import date, datetime
-from pathlib import Path
 
 from tests.conftest import make_cve_record, make_baseline_zip
 from vlake import cvelist
