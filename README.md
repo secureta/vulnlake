@@ -38,6 +38,12 @@ pl.read_parquet("https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet"
 `epss(cve VARCHAR, epss DOUBLE, percentile DOUBLE, date DATE, model_version VARCHAR)`
 — `percentile` is NULL for early 2021 files (the column did not exist yet).
 
+Layout: closed years are consolidated into one Parquet per year
+(`epss/year=2021/epss-2021.parquet`, sorted by `cve, date` so per-CVE history
+queries prune well); only the current year has per-day files
+(`epss-YYYY-MM-DD.parquet`). Day-level direct URLs therefore exist only for
+the current year — year-level globs (`year=2021/*.parquet`) work for all years.
+
 ## Build your own lake
 
 ```bash
@@ -56,6 +62,15 @@ uv run vlake backfill epss --source /tmp/epss_scores
 uv run vlake update epss
 uv run vlake verify
 ```
+
+No local machine needed for the backfill: after configuring the `publish`
+Environment (below), open the **Actions** tab → **backfill** → **Run
+workflow**. The job clones the mirror on the runner, consolidates closed
+years into per-year Parquet files, and ingests the current year day by day
+(roughly an hour). It is idempotent — already-registered years/days are
+skipped — so re-running after a failure is safe. It shares the `publish`
+concurrency group with the daily job, so the two never touch the catalog
+concurrently.
 
 Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variables.
 
