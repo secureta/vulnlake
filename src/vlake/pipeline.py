@@ -399,7 +399,7 @@ def backfill_ghsa(cfg: Config, source_tar: Path | None = None) -> str:
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
-    tables = {"epss/": "epss", "cve/": "cve_history"}
+    tables = {"epss/": "epss", "cve/": "cve_history", "ghsa/": "ghsa_history"}
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
         (k, table)
@@ -426,6 +426,7 @@ def rebuild_catalog(cfg: Config) -> str:
 
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -460,20 +461,30 @@ def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict
     }
 
 
-def _verify_cve(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
-    """cve: パス集合の一致 + max(date_updated) が日次キーの日付に追随していること。
+def _verify_history(
+    storage: Storage,
+    lake: Lake,
+    max_age_days: int | None,
+    *,
+    prefix: str,
+    table: str,
+    ts_column: str,
+    update_key_re: re.Pattern,
+) -> dict:
+    """履歴型データセット (cve/ghsa) 共通: パス集合の一致 +
+    max(ts_column) が日次キーの日付に追随していること。
 
-    backfill 年ファイルは ID 年であって date_updated と無関係なので min 側の
-    検証はしない。baseline は前日までの更新を含む断面なので、日次キーの日付より
-    max(date_updated) が1日古いところまでは正常とみなす。
+    backfill 年ファイルは ID 年 / published 年であって ts_column と無関係なので
+    min 側の検証はしない。スナップショットは前日までの更新を含む断面なので、
+    日次キーの日付より max(ts_column) が1日古いところまでは正常とみなす。
     """
-    keys = [k for k in storage.list("cve/") if k.endswith(".parquet")]
+    keys = [k for k in storage.list(prefix) if k.endswith(".parquet")]
     storage_paths = {storage.url(k) for k in keys}
-    catalog_paths = lake.registered_paths("cve_history")
+    catalog_paths = lake.registered_paths(table)
     try:
         row_count, min_ts, max_ts = lake.query(
-            # ALIAS はクラス定数の固定識別子
-            f"SELECT count(*), min(date_updated), max(date_updated) FROM {lake.ALIAS}.cve_history"  # noqa: S608
+            # ALIAS はクラス定数、table/ts_column は呼び出し側の固定文字列
+            f"SELECT count(*), min({ts_column}), max({ts_column}) FROM {lake.ALIAS}.{table}"  # noqa: S608
         )[0]
     except duckdb.Error:
         return {
@@ -487,9 +498,7 @@ def _verify_cve(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
         }
     ok = storage_paths == catalog_paths
     update_dates = [
-        date.fromisoformat(m.group(1))
-        for k in keys
-        if (m := _UPDATE_KEY_DATE.search(k))
+        date.fromisoformat(m.group(1)) for k in keys if (m := update_key_re.search(k))
     ]
     if update_dates:
         ok = (
@@ -540,7 +549,24 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
         try:
             reports = {
                 "epss": _verify_epss(storage, lake, max_age_days),
-                "cve": _verify_cve(storage, lake, max_age_days),
+                "cve": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="cve/",
+                    table="cve_history",
+                    ts_column="date_updated",
+                    update_key_re=_UPDATE_KEY_DATE,
+                ),
+                "ghsa": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="ghsa/",
+                    table="ghsa_history",
+                    ts_column="modified",
+                    update_key_re=_GHSA_UPDATE_KEY_DATE,
+                ),
             }
         finally:
             lake.close()

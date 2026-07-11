@@ -195,3 +195,69 @@ def test_update_ghsa_refuses_on_empty_table(cfg, tmp_path, monkeypatch):
     _patch_fetch(monkeypatch, tmp_path, _records(), "initial")
     msg = pipeline.update_ghsa(cfg, today=date(2026, 7, 12))
     assert msg == "refused: ghsa_history is empty; run backfill ghsa first"
+
+
+def test_verify_covers_ghsa(cfg, tmp_path):
+    tp = tmp_path / "initial.tar.gz"
+    make_ghsa_tarball(tp, _records())
+    pipeline.backfill_ghsa(cfg, source_tar=tp)
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True
+    assert report["stale"] is False
+    rep = report["datasets"]["ghsa"]
+    assert rep["files_in_storage"] == rep["files_in_catalog"] == 2
+    assert rep["row_count"] == 3
+    assert rep["max_date"] == date(2026, 7, 1)
+    # 他データセットは空でも ok
+    assert report["datasets"]["epss"]["ok"] is True
+    assert report["datasets"]["cve"]["ok"] is True
+
+
+def test_verify_detects_ghsa_stray_file(cfg, tmp_path):
+    tp = tmp_path / "initial.tar.gz"
+    make_ghsa_tarball(
+        tp, [make_ghsa_record("GHSA-aaaa-bbbb-cccc", published="2021-01-01T00:00:00Z")]
+    )
+    pipeline.backfill_ghsa(cfg, source_tar=tp)
+
+    stray = cfg.local_dir / "ghsa" / "year=2099" / "ghsa-2099.parquet"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not parquet")
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert report["datasets"]["ghsa"]["ok"] is False
+
+
+def test_verify_ghsa_staleness(cfg, tmp_path):
+    tp = tmp_path / "initial.tar.gz"
+    make_ghsa_tarball(
+        tp,
+        [
+            make_ghsa_record(
+                "GHSA-aaaa-bbbb-cccc",
+                published="2021-01-01T00:00:00Z",
+                modified="2024-01-01T00:00:00Z",
+            )
+        ],
+    )
+    pipeline.backfill_ghsa(cfg, source_tar=tp)
+
+    report = pipeline.verify(cfg, max_age_days=3)
+    assert report["datasets"]["ghsa"]["stale"] is True
+    assert report["stale"] is True
+    assert report["ok"] is True
+
+
+def test_rebuild_catalog_covers_ghsa(cfg, tmp_path):
+    tp = tmp_path / "initial.tar.gz"
+    make_ghsa_tarball(tp, _records())
+    pipeline.backfill_ghsa(cfg, source_tar=tp)
+
+    (cfg.local_dir / "vlake.ducklake").unlink()
+    assert pipeline.rebuild_catalog(cfg) == "rebuilt catalog with 2 files"
+
+    con = _attach(cfg)
+    assert con.execute("SELECT count(*) FROM frozen.ghsa_history").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM frozen.ghsa").fetchone()[0] == 3
