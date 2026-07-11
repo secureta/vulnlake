@@ -214,6 +214,53 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
     )
 
 
+def backfill_cve(cfg: Config, source_zip: Path | None = None) -> str:
+    """baseline zip (省略時は最新リリースをダウンロード) から全 CVE を取り込む。
+
+    CVE-ID 年ごとに1ファイル (cve ソート)。登録済みの年は skip (冪等)。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        if source_zip is None:
+            baseline_date, url = cvelist.latest_baseline()
+            source_zip = workdir / "baseline.zip"
+            print(f"  baseline {baseline_date} をダウンロード中...")
+            cvelist.download(url, source_zip)
+        zf = cvelist.open_baseline(source_zip, workdir / "unzip")
+        lake, catalog = _open_lake(storage, workdir)
+        added = skipped = bad = 0
+        try:
+            registered = lake.registered_paths()
+            for year, names in cvelist.iter_names_by_year(zf):
+                key = cvelist.key_for_year(year)
+                if storage.url(key) in registered:
+                    skipped += 1
+                    continue
+                rows = []
+                for name in names:
+                    row = cvelist.parse_record(zf.read(name))
+                    if row is None:
+                        bad += 1
+                    else:
+                        rows.append(row)
+                if not rows:
+                    continue
+                parquet = workdir / f"cve-{year}.parquet"
+                cvelist.write_parquet(cvelist.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"cve {year} backfill ({len(rows)} records)")
+                lake.add_file("cve_history", storage.url(key))
+                parquet.unlink()
+                added += 1
+                print(f"  {year}: {len(rows)} 件")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            zf.close()
+            lake.close()
+    return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
