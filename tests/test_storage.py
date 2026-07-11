@@ -1,3 +1,5 @@
+import pytest
+
 from vlake.config import Config
 from vlake.storage import LocalStorage, make_storage
 
@@ -40,3 +42,15 @@ def test_local_list_and_url(tmp_path):
 def test_make_storage_local(tmp_path):
     cfg = Config(s3_endpoint=None, s3_bucket=None, public_url=None, local_dir=tmp_path)
     assert isinstance(make_storage(cfg), LocalStorage)
+
+
+def test_make_storage_missing_public_url():
+    cfg = Config(s3_endpoint=None, s3_bucket="b", public_url=None, local_dir=None)
+    with pytest.raises(ValueError):
+        make_storage(cfg)
+
+
+def test_make_storage_missing_local_dir():
+    cfg = Config(s3_endpoint=None, s3_bucket=None, public_url=None, local_dir=None)
+    with pytest.raises(ValueError):
+        make_storage(cfg)

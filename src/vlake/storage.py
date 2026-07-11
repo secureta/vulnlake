@@ -99,7 +99,9 @@ class S3Storage:
 
 def make_storage(cfg: Config) -> Storage:
     if cfg.s3_bucket:
-        assert cfg.public_url is not None
+        if cfg.public_url is None:
+            raise ValueError("public_url が未設定 (Config.from_env が保証する不変条件)")
         return S3Storage(cfg.s3_bucket, cfg.s3_endpoint, cfg.public_url)
-    assert cfg.local_dir is not None
+    if cfg.local_dir is None:
+        raise ValueError("local_dir が未設定 (Config.from_env が保証する不変条件)")
     return LocalStorage(cfg.local_dir)
