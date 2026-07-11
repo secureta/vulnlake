@@ -1,7 +1,7 @@
 name: publish
 on:
   schedule:
-    - cron: "30 14 * * *"  # EPSS 更新 (~13:30 UTC) の後
+    - cron: "30 14 * * *"  # EPSS 更新 (~13:30 UTC) の後。cvelistV5 baseline は 00:00 UTC 断面
   workflow_dispatch:
 permissions:
   contents: read  # checkout のみ。GITHUB_TOKEN の権限を最小化 (書き込み先は S3 のみ)
@@ -26,6 +26,15 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+      - run: uv run vlake update cve
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          GITHUB_TOKEN: ${{ github.token }}  # Releases API のレート制限回避
       - run: uv run vlake verify --max-age-days 3
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}

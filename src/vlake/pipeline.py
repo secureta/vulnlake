@@ -9,12 +9,12 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
 
-from . import epss
+from . import cvelist, epss
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -60,12 +60,13 @@ def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
     catalog = workdir / CATALOG_KEY
     existed = storage.get(CATALOG_KEY, catalog)
     lake = Lake(catalog, data_path=None if existed else storage.url("unused"))
-    lake.ensure_epss_table()
+    lake.ensure_tables()
     return lake, catalog
 
 
 def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
-    lake.refresh_datasets_view([epss.LICENSE_INFO])
+    lake.refresh_datasets_view([epss.LICENSE_INFO, cvelist.LICENSE_INFO])
+    lake.refresh_cve_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -213,69 +214,142 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
     )
 
 
+def update_cve(cfg: Config) -> str:
+    """最新 baseline zip から、カタログの max(date_updated) より新しいレコードを追記する。
+
+    差分抽出は日時比較のみなので、何日停止しても次の1回で完全回復する。
+    baseline zip のダウンロード (~550MB) は登録済みチェックの後に行う。
+    """
+    storage = make_storage(cfg)
+    baseline_date, url = cvelist.latest_baseline()
+    key = cvelist.key_for_update(baseline_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {baseline_date}"
+            max_updated = lake.max_cve_date_updated()
+            if max_updated is None:
+                return "refused: cve_history is empty; run backfill cve first"
+            zip_path = workdir / "baseline.zip"
+            cvelist.download(url, zip_path)
+            zf = cvelist.open_baseline(zip_path, workdir / "unzip")
+            rows, bad = [], 0
+            try:
+                for _, names in cvelist.iter_names_by_year(zf):
+                    for name in names:
+                        row = cvelist.parse_record(zf.read(name))
+                        if row is None:
+                            bad += 1
+                        elif row["date_updated"] > max_updated:
+                            rows.append(row)
+            finally:
+                zf.close()
+            if not rows:
+                return f"no-new-records {baseline_date}"
+            parquet = workdir / "updates.parquet"
+            cvelist.write_parquet(cvelist.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"cve updates {baseline_date} ({len(rows)} records)")
+            lake.add_file("cve_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {baseline_date} ({len(rows)} records, {bad} bad)"
+
+
+def backfill_cve(cfg: Config, source_zip: Path | None = None) -> str:
+    """baseline zip (省略時は最新リリースをダウンロード) から全 CVE を取り込む。
+
+    CVE-ID 年ごとに1ファイル (cve ソート)。登録済みの年は skip (冪等)。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        if source_zip is None:
+            baseline_date, url = cvelist.latest_baseline()
+            source_zip = workdir / "baseline.zip"
+            print(f"  baseline {baseline_date} をダウンロード中...")
+            cvelist.download(url, source_zip)
+        zf = cvelist.open_baseline(source_zip, workdir / "unzip")
+        lake, catalog = _open_lake(storage, workdir)
+        added = skipped = bad = 0
+        try:
+            registered = lake.registered_paths()
+            for year, names in cvelist.iter_names_by_year(zf):
+                key = cvelist.key_for_year(year)
+                if storage.url(key) in registered:
+                    skipped += 1
+                    continue
+                rows = []
+                for name in names:
+                    row = cvelist.parse_record(zf.read(name))
+                    if row is None:
+                        bad += 1
+                    else:
+                        rows.append(row)
+                if not rows:
+                    continue
+                parquet = workdir / f"cve-{year}.parquet"
+                cvelist.write_parquet(cvelist.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"cve {year} backfill ({len(rows)} records)")
+                lake.add_file("cve_history", storage.url(key))
+                parquet.unlink()
+                added += 1
+                print(f"  {year}: {len(rows)} 件")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            zf.close()
+            lake.close()
+    return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
-    keys = [k for k in storage.list("epss/") if k.endswith(".parquet")]
-    if not keys:
+    tables = {"epss/": "epss", "cve/": "cve_history"}
+    keys = [k for k in storage.list("") if k.endswith(".parquet")]
+    routed = [
+        (k, table)
+        for k in keys
+        for prefix, table in tables.items()
+        if k.startswith(prefix)
+    ]
+    if not routed:
         return "refused: no parquet files in storage"
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
         catalog = workdir / CATALOG_KEY
         lake = Lake(catalog, data_path=storage.url("unused"))
         try:
-            lake.ensure_epss_table()
-            for key in keys:
-                lake.add_file("epss", storage.url(key))
+            lake.ensure_tables()
+            for key, table in routed:
+                lake.add_file(table, storage.url(key))
             _publish_catalog(storage, lake, catalog)
         finally:
             lake.close()
-    return f"rebuilt catalog with {len(keys)} files"
+    ignored = len(keys) - len(routed)
+    suffix = f" (ignored {ignored} unknown keys)" if ignored else ""
+    return f"rebuilt catalog with {len(routed)} files{suffix}"
 
 
-def verify(cfg: Config, max_age_days: int | None = None) -> dict:
-    """カタログとストレージの整合を検証する。
+_UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
-    件数一致だけでは「同数だが中身が違う」差し替えを見逃すため、
-    登録パスの集合 (Lake.registered_paths()) をストレージの実キー集合と突き合わせ、
-    さらにファイル名由来の日付を検証する。min は年ファイル (epss-YYYY.parquet) が
-    日付を持たないため年単位の比較に緩和し、max は進行中の年が常に日次であることを
-    利用して日次キーの max と厳密比較する。row_count/min_date/max_date 自体は
-    count(*)/min/max のファイル統計 (メタデータ) で解決されるため、
-    リモートでも全 Parquet の読み込みは発生しない。
 
-    max_age_days を指定すると、カタログの max_date が古すぎる場合に
-    report["stale"] = True を立てる (ok には影響しない、上流の恒常的な
-    403/404 で更新が止まっていても ok=True のまま緑になり続ける問題への対処)。
-    """
-    storage = make_storage(cfg)
+def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
+    """epss: パス集合の一致 + ファイル名由来の日付/年とテーブル統計の整合。"""
     keys = [k for k in storage.list("epss/") if k.endswith(".parquet")]
     storage_paths = {storage.url(k) for k in keys}
+    catalog_paths = lake.registered_paths("epss")
+    row_count, min_date, max_date = lake.query(
+        # ALIAS はクラス定数の固定識別子
+        f"SELECT count(*), min(date), max(date) FROM {lake.ALIAS}.epss"  # noqa: S608
+    )[0]
+    ok = storage_paths == catalog_paths
     key_dates = _dates_from_keys(keys)
     key_years = _years_from_keys(keys)
-    with tempfile.TemporaryDirectory() as td:
-        catalog = Path(td) / CATALOG_KEY
-        if not storage.get(CATALOG_KEY, catalog):
-            return {
-                "files_in_storage": len(keys),
-                "files_in_catalog": None,
-                "row_count": None,
-                "min_date": None,
-                "max_date": None,
-                "ok": False,
-                "stale": False,
-                "error": "catalog not found",
-            }
-        lake = Lake(catalog)
-        try:
-            catalog_paths = lake.registered_paths()
-            row_count, min_date, max_date = lake.query(
-                # ALIAS はクラス定数の固定識別子
-                f"SELECT count(*), min(date), max(date) FROM {lake.ALIAS}.epss"  # noqa: S608
-            )[0]
-        finally:
-            lake.close()
-    ok = storage_paths == catalog_paths
     if key_dates:
         ok = ok and max_date == max(key_dates)
     if key_years:
@@ -293,4 +367,95 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
         "max_date": max_date,
         "ok": ok,
         "stale": stale,
+    }
+
+
+def _verify_cve(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
+    """cve: パス集合の一致 + max(date_updated) が日次キーの日付に追随していること。
+
+    backfill 年ファイルは ID 年であって date_updated と無関係なので min 側の
+    検証はしない。baseline は前日までの更新を含む断面なので、日次キーの日付より
+    max(date_updated) が1日古いところまでは正常とみなす。
+    """
+    keys = [k for k in storage.list("cve/") if k.endswith(".parquet")]
+    storage_paths = {storage.url(k) for k in keys}
+    catalog_paths = lake.registered_paths("cve_history")
+    try:
+        row_count, min_ts, max_ts = lake.query(
+            # ALIAS はクラス定数の固定識別子
+            f"SELECT count(*), min(date_updated), max(date_updated) FROM {lake.ALIAS}.cve_history"  # noqa: S608
+        )[0]
+    except duckdb.Error:
+        return {
+            "files_in_storage": len(keys),
+            "files_in_catalog": 0,
+            "row_count": None,
+            "min_date": None,
+            "max_date": None,
+            "ok": not keys,  # ファイルがあるのにテーブルが無いのは不整合
+            "stale": False,
+        }
+    ok = storage_paths == catalog_paths
+    update_dates = [
+        date.fromisoformat(m.group(1))
+        for k in keys
+        if (m := _UPDATE_KEY_DATE.search(k))
+    ]
+    if update_dates:
+        ok = (
+            ok
+            and max_ts is not None
+            and max_ts.date() >= max(update_dates) - timedelta(days=1)
+        )
+    stale = (
+        max_age_days is not None
+        and max_ts is not None
+        and (date.today() - max_ts.date()).days > max_age_days
+    )
+    return {
+        "files_in_storage": len(keys),
+        "files_in_catalog": len(catalog_paths),
+        "row_count": row_count,
+        "min_date": min_ts.date() if min_ts else None,
+        "max_date": max_ts.date() if max_ts else None,
+        "ok": ok,
+        "stale": stale,
+    }
+
+
+def verify(cfg: Config, max_age_days: int | None = None) -> dict:
+    """カタログとストレージの整合をデータセットごとに検証する。
+
+    件数一致だけでは「同数だが中身が違う」差し替えを見逃すため、
+    テーブル別の登録パス集合をストレージの実キー集合と突き合わせる。
+    統計 (count/min/max) はファイルメタデータで解決されるため、
+    リモートでも全 Parquet の読み込みは発生しない。
+
+    max_age_days は鮮度の監視 (上流停止で ok=True のまま緑になり続ける
+    問題への対処)。ok には影響しない。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        catalog = Path(td) / CATALOG_KEY
+        if not storage.get(CATALOG_KEY, catalog):
+            n = len([k for k in storage.list("") if k.endswith(".parquet")])
+            return {
+                "ok": False,
+                "stale": False,
+                "error": "catalog not found",
+                "files_in_storage": n,
+                "datasets": {},
+            }
+        lake = Lake(catalog)
+        try:
+            reports = {
+                "epss": _verify_epss(storage, lake, max_age_days),
+                "cve": _verify_cve(storage, lake, max_age_days),
+            }
+        finally:
+            lake.close()
+    return {
+        "ok": all(r["ok"] for r in reports.values()),
+        "stale": any(r["stale"] for r in reports.values()),
+        "datasets": reports,
     }
