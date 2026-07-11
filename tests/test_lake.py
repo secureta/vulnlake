@@ -4,8 +4,8 @@ from pathlib import Path
 
 import duckdb
 
-from tests.conftest import make_cve_record, make_epss_csv_gz
-from vlake import cvelist, epss
+from tests.conftest import make_cve_record, make_epss_csv_gz, make_ghsa_record
+from vlake import cvelist, epss, ghsa
 from vlake.lake import Lake
 
 
@@ -130,3 +130,43 @@ def test_datasets_view(tmp_path):
     con.execute("INSTALL ducklake; LOAD ducklake;")
     con.execute(f"ATTACH 'ducklake:{catalog}' AS frozen (READ_ONLY)")
     assert con.execute("SELECT count(*) FROM frozen.datasets").fetchone()[0] == 1
+
+
+def _make_ghsa_parquet(tmp_path: Path, ghsa_id: str, modified: str, name: str) -> Path:
+    rec = make_ghsa_record(ghsa_id, modified=modified)
+    row = ghsa.parse_record(json.dumps(rec).encode())
+    out = tmp_path / name
+    ghsa.write_parquet(ghsa.rows_to_table([row]), out)
+    return out
+
+
+def test_ghsa_history_and_latest_view(tmp_path):
+    catalog = tmp_path / "vlake.ducklake"
+    old = _make_ghsa_parquet(
+        tmp_path, "GHSA-aaaa-bbbb-cccc", "2025-01-01T00:00:00Z", "g1.parquet"
+    )
+    new = _make_ghsa_parquet(
+        tmp_path, "GHSA-aaaa-bbbb-cccc", "2026-01-01T00:00:00Z", "g2.parquet"
+    )
+
+    lake = Lake(catalog, data_path=str(tmp_path / "unused"))
+    lake.ensure_tables()
+    assert lake.max_ghsa_modified() is None
+    lake.add_file("ghsa_history", str(old))
+    lake.add_file("ghsa_history", str(new))
+    assert lake.max_ghsa_modified() == datetime(2026, 1, 1)
+    lake.refresh_ghsa_view()
+    lake.refresh_ghsa_view()  # 再実行しても壊れない
+    lake.close()
+
+    con = duckdb.connect()
+    con.execute("INSTALL ducklake; LOAD ducklake;")
+    con.execute(f"ATTACH 'ducklake:{catalog}' AS frozen (READ_ONLY)")
+    assert con.execute("SELECT count(*) FROM frozen.ghsa_history").fetchone()[0] == 2
+    rows = con.execute("SELECT ghsa, modified FROM frozen.ghsa").fetchall()
+    assert rows == [("GHSA-aaaa-bbbb-cccc", datetime(2026, 1, 1))]
+    # ネスト列 affected を UNNEST で掘れる
+    pkg = con.execute(
+        "SELECT a.package FROM frozen.ghsa, UNNEST(affected) AS t(a) LIMIT 1"
+    ).fetchone()[0]
+    assert pkg == "org.apache.logging.log4j:log4j-core"
