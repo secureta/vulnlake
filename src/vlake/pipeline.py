@@ -581,6 +581,7 @@ def rebuild_catalog(cfg: Config) -> str:
         "cve/": "cve_history",
         "ghsa/": "ghsa_history",
         "exploitdb/": "exploitdb_history",
+        "nuclei/": "nuclei_history",
     }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
@@ -612,6 +613,7 @@ _GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 _EXPLOITDB_UPDATE_KEY_DATE = re.compile(
     r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
+_NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -765,6 +767,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="exploitdb_history",
                     ts_column="date_updated",
                     update_key_re=_EXPLOITDB_UPDATE_KEY_DATE,
+                ),
+                "nuclei": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="nuclei/",
+                    table="nuclei_history",
+                    ts_column="fetched_date",
+                    update_key_re=_NUCLEI_UPDATE_KEY_DATE,
                 ),
             }
         finally:

@@ -218,3 +218,46 @@ def test_update_nuclei_counts_bad_yaml(cfg, tmp_path, monkeypatch):
         pipeline.update_nuclei(cfg, today=date(2026, 7, 12))
         == "published 2026-07-12 (1 records, 2 bad)"
     )
+
+
+def test_verify_covers_nuclei(cfg, tmp_path, monkeypatch):
+    _patch_download(monkeypatch, tmp_path, _initial_files())
+    pipeline.update_nuclei(cfg, today=date(2026, 7, 12))
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True
+    rep = report["datasets"]["nuclei"]
+    assert rep["files_in_storage"] == rep["files_in_catalog"] == 1
+    assert rep["row_count"] == 3
+    assert rep["max_date"] == date(2026, 7, 12)
+
+
+def test_verify_detects_nuclei_stray_file(cfg, tmp_path, monkeypatch):
+    _patch_download(monkeypatch, tmp_path, _initial_files())
+    pipeline.update_nuclei(cfg, today=date(2026, 7, 12))
+
+    stray = (
+        cfg.local_dir
+        / "nuclei"
+        / "updates"
+        / "year=2099"
+        / "nuclei-updates-2099-01-01.parquet"
+    )
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not parquet")
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert report["datasets"]["nuclei"]["ok"] is False
+
+
+def test_rebuild_catalog_covers_nuclei(cfg, tmp_path, monkeypatch):
+    _patch_download(monkeypatch, tmp_path, _initial_files())
+    pipeline.update_nuclei(cfg, today=date(2026, 7, 12))
+
+    (cfg.local_dir / "vlake.ducklake").unlink()
+    assert pipeline.rebuild_catalog(cfg) == "rebuilt catalog with 1 files"
+
+    con = _attach(cfg)
+    assert con.execute("SELECT count(*) FROM frozen.nuclei_history").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM frozen.nuclei").fetchone()[0] == 3
