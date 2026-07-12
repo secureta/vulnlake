@@ -14,7 +14,7 @@ def main() -> None:
 
 
 @main.command()
-@click.argument("dataset", type=click.Choice(["epss", "cve", "ghsa"]))
+@click.argument("dataset", type=click.Choice(["epss", "cve", "ghsa", "exploitdb"]))
 @click.option(
     "--date",
     "target",
@@ -32,7 +32,12 @@ def update(dataset: str, target) -> None:
         raise click.UsageError(
             f"{dataset} は常に最新スナップショットを取得します (--date 非対応)"
         )
-    result = pipeline.update_cve(cfg) if dataset == "cve" else pipeline.update_ghsa(cfg)
+    updaters = {
+        "cve": pipeline.update_cve,
+        "ghsa": pipeline.update_ghsa,
+        "exploitdb": pipeline.update_exploitdb,
+    }
+    result = updaters[dataset](cfg)
     click.echo(result)
     if result.startswith("refused"):
         # backfill 未実施のまま日次更新だけが緑になるサイレント失敗を防ぐ
@@ -40,14 +45,15 @@ def update(dataset: str, target) -> None:
 
 
 @main.command()
-@click.argument("dataset", type=click.Choice(["epss", "cve", "ghsa"]))
+@click.argument("dataset", type=click.Choice(["epss", "cve", "ghsa", "exploitdb"]))
 @click.option(
     "--source",
     default=None,
     type=click.Path(exists=True, path_type=Path),
     help=(
         "epss: mirror clone ディレクトリ (必須) / cve: baseline zip / "
-        "ghsa: リポジトリ tarball (cve/ghsa は省略時に最新をダウンロード)"
+        "ghsa: リポジトリ tarball / exploitdb: files_exploits.csv "
+        "(cve/ghsa/exploitdb は省略時に最新をダウンロード)"
     ),
 )
 def backfill(dataset: str, source: Path | None) -> None:
@@ -63,10 +69,16 @@ def backfill(dataset: str, source: Path | None) -> None:
         if source is not None and not source.is_file():
             raise click.UsageError("cve の --source は baseline zip ファイルです")
         click.echo(pipeline.backfill_cve(cfg, source))
-    else:
+    elif dataset == "ghsa":
         if source is not None and not source.is_file():
             raise click.UsageError("ghsa の --source はリポジトリ tarball ファイルです")
         click.echo(pipeline.backfill_ghsa(cfg, source))
+    else:
+        if source is not None and not source.is_file():
+            raise click.UsageError(
+                "exploitdb の --source は files_exploits.csv ファイルです"
+            )
+        click.echo(pipeline.backfill_exploitdb(cfg, source))
 
 
 @main.command("rebuild-catalog")

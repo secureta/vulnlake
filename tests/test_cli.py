@@ -168,3 +168,82 @@ def test_backfill_ghsa_via_cli_with_source(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["backfill", "ghsa", "--source", str(tp)])
     assert result.exit_code == 0, result.output
     assert "backfilled 1 year files" in result.output
+
+
+def test_update_exploitdb_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_exploitdb",
+        lambda cfg: "published 2026-07-12 (1 records, 0 bad)",
+    )
+    result = CliRunner().invoke(main, ["update", "exploitdb"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-12" in result.output
+
+
+def test_update_exploitdb_refused_exits_nonzero(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_exploitdb",
+        lambda cfg: "refused: exploitdb_history is empty; run backfill exploitdb first",
+    )
+    result = CliRunner().invoke(main, ["update", "exploitdb"])
+    assert result.exit_code == 1
+    assert "refused" in result.output
+
+
+def test_update_exploitdb_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "exploitdb", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_exploitdb_via_cli_with_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path / "bucket"))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    csv_path = tmp_path / "files_exploits.csv"
+    csv_path.write_text("id,file,description,date,author,type,platform,port\n")
+
+    called = {}
+
+    def fake_backfill(cfg, source):
+        called["source"] = source
+        return "backfilled 1 year files (skipped 0 years, 0 bad records)"
+
+    monkeypatch.setattr(pipeline, "backfill_exploitdb", fake_backfill)
+    result = CliRunner().invoke(
+        main, ["backfill", "exploitdb", "--source", str(csv_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "backfilled 1 year files" in result.output
+    assert called["source"] == csv_path
+
+
+def test_backfill_exploitdb_via_cli_without_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path / "bucket"))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    called = {}
+
+    def fake_backfill(cfg, source):
+        called["source"] = source
+        return "backfilled 1 year files (skipped 0 years, 0 bad records)"
+
+    monkeypatch.setattr(pipeline, "backfill_exploitdb", fake_backfill)
+    result = CliRunner().invoke(main, ["backfill", "exploitdb"])
+    assert result.exit_code == 0, result.output
+    assert "backfilled 1 year files" in result.output
+    assert called["source"] is None
