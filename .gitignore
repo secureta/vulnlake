@@ -5,3 +5,14 @@ dist/
 .pytest_cache/
 *.ducklake
 *.ducklake.wal
+
+# プロジェクト共有の pi / Claude Code スキルだけはコミット対象にする
+# (グローバル gitignore が .* でドットディレクトリを除外する環境でも共有できるようにする)
+!.pi/
+.pi/*
+!.pi/skills/
+!.pi/skills/**
+!.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**

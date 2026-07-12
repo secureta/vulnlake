@@ -6,7 +6,8 @@ Currently included: **EPSS** (full daily history since 2021-04-14), **CVE**
 Database, github-reviewed advisories with package/version ranges),
 **ExploitDB** (Exploit Database index, exploit metadata linked to code by URL),
 **nuclei** (nuclei-templates index, detection template metadata linked to
-templates by URL), and **KEV** (CISA Known Exploited Vulnerabilities catalog).
+templates by URL), **CWE** (Common Weakness Enumeration catalog), and **KEV**
+(CISA Known Exploited Vulnerabilities catalog).
 
 ## Query it
 
@@ -54,91 +55,215 @@ pl.read_parquet("https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet"
 
 ## Schema
 
-`epss(cve VARCHAR, epss DOUBLE, percentile DOUBLE, date DATE, model_version VARCHAR)`
-— `percentile` is NULL for early 2021 files (the column did not exist yet).
+Each dataset is stored as an **append-only history table** plus a **latest
+view** that returns just the most recent row per record — query the view for
+current state, the history table to see how a record changed over time.
+EPSS is the exception: its full daily history *is* the data, so there is no
+separate view.
 
-Layout: closed years are consolidated into one Parquet per year
-(`epss/year=2021/epss-2021.parquet`, sorted by `cve, date` so per-CVE history
-queries prune well); only the current year has per-day files
-(`epss-YYYY-MM-DD.parquet`). Day-level direct URLs therefore exist only for
-the current year — year-level globs (`year=2021/*.parquet`) work for all years.
+| Query this | Backed by | One row per | Content |
+|---|---|---|---|
+| `epss` | `epss` | CVE × date | EPSS exploit-prediction scores (full daily history) |
+| `cve` | `cve_history` | CVE | CVE List V5 records (MITRE/CNA) |
+| `ghsa` | `ghsa_history` | GHSA ID | GitHub-reviewed advisories with affected package ranges |
+| `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
+| `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
+| `cwe` | `cwe_history` | `cwe_id` | CWE catalog snapshot (join target for `cwe` columns) |
+| `kev` | `kev_history` | CVE | CISA Known Exploited Vulnerabilities catalog |
+| `datasets` | *(view)* | dataset | Data sources, licenses & attributions |
 
-`cve_history(cve, state, assigner, title, description, cvss, cvss_version,
-cvss_severity, cvss_vector, cwe VARCHAR[], date_published, date_reserved,
-date_updated, raw)` — append-only change history from cvelistV5 daily
-baselines. The `cve` view returns the latest row per CVE
-(`raw` holds the full CVE JSON 5.x record).
+Views tagged **tombstone** (`nuclei`, `kev`) keep records that disappeared
+upstream, flagged `removed = true` with their last known values — filter
+`WHERE NOT removed` for the currently-live set.
 
-Layout: `cve/year=YYYY/cve-YYYY.parquet` (backfill snapshot, partitioned by
-CVE-ID year, sorted by cve) plus
-`cve/updates/year=YYYY/cve-updates-YYYY-MM-DD.parquet` (daily deltas of
-records whose `dateUpdated` advanced past the catalog's max).
+### `epss` — exploit prediction scores
 
-`ghsa_history(ghsa, cve, summary, severity, cvss, cvss_version, cvss_vector,
-cwe VARCHAR[], affected STRUCT(ecosystem, package, introduced, fixed,
-last_affected)[], published, modified, withdrawn, raw)` — append-only change
-history of github-reviewed advisories from the GitHub Advisory Database.
-The `ghsa` view returns the latest row per GHSA ID (`raw` holds the full
-OSV JSON record; numeric `cvss` is computed from the vector).
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `epss` | DOUBLE | Probability (0–1) of exploitation in the next 30 days |
+| `percentile` | DOUBLE | Rank among all scored CVEs; NULL for early-2021 files (column did not exist yet) |
+| `date` | DATE | Score date |
+| `model_version` | VARCHAR | EPSS model version that produced the score |
 
-Layout: `ghsa/year=YYYY/ghsa-YYYY.parquet` (backfill snapshot, partitioned by
-published year, sorted by ghsa) plus
-`ghsa/updates/year=YYYY/ghsa-updates-YYYY-MM-DD.parquet` (daily deltas of
-records whose `modified` advanced past the catalog's max; dated by run date).
+### `cve` / `cve_history` — CVE List V5
 
-`exploitdb_history(edb_id INTEGER, cve VARCHAR[], description, type, platform,
-author, port INTEGER, verified BOOLEAN, tags, aliases, codes, file, code_url,
-source_url, application_url, screenshot_url, date_published DATE, date_added DATE,
-date_updated DATE)` — append-only index history from the Exploit Database
-`files_exploits.csv`. The `exploitdb` view returns the latest row per `edb_id`
-(by `date_updated`). Exploit code is not redistributed; `code_url` links to it.
+Append-only change history from cvelistV5 daily baselines. The `cve` view
+returns the latest row per CVE.
 
-Layout: `exploitdb/year=YYYY/exploitdb-YYYY.parquet` (backfill snapshot,
-partitioned by `date_published` year, sorted by `edb_id`) plus
-`exploitdb/updates/year=YYYY/exploitdb-updates-YYYY-MM-DD.parquet` (daily deltas
-of rows whose `date_updated` advanced; dated by run date).
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `state` | VARCHAR | Record state (`PUBLISHED` / `REJECTED`) |
+| `assigner` | VARCHAR | Assigning CNA |
+| `title` | VARCHAR | Vulnerability title |
+| `description` | VARCHAR | English description |
+| `cvss` | DOUBLE | CVSS base score |
+| `cvss_version` | VARCHAR | CVSS version (e.g. `3.1`) |
+| `cvss_severity` | VARCHAR | Qualitative severity (e.g. `CRITICAL`) |
+| `cvss_vector` | VARCHAR | CVSS vector string |
+| `cwe` | VARCHAR[] | Associated CWE IDs (join to `cwe`) |
+| `date_published` | TIMESTAMP | First publication |
+| `date_reserved` | TIMESTAMP | CVE ID reservation |
+| `date_updated` | TIMESTAMP | Last update (also the view's latest-row key) |
+| `raw` | VARCHAR | Full CVE JSON 5.x record |
 
-`nuclei_history(template_id, name, severity, description, author VARCHAR[],
-tags VARCHAR[], reference VARCHAR[], cve VARCHAR[], cwe VARCHAR[],
-cvss_score DOUBLE, cvss_metrics, epss_score DOUBLE, epss_percentile DOUBLE,
-cpe, vendor, product, verified BOOLEAN, type, file, template_url, digest,
-fetched_date DATE, removed BOOLEAN)` — append-only index of nuclei-templates
-info blocks. Templates carry no modification timestamp upstream, so changes
-are detected by `digest` (SHA-256 of the template with its signature line
-stripped). Rows that disappear upstream get a tombstone row with
-`removed = true` carrying the last known values. The `nuclei` view returns
-the latest row per `template_id`. `epss_score` / `epss_percentile` are
-snapshots embedded in the template at authoring time — the `epss` table is
-the source of truth for current scores.
+### `ghsa` / `ghsa_history` — GitHub Advisory Database
 
-Layout: `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` (daily
-deltas; the first run is the full load — there is no backfill for nuclei).
+Append-only change history of GitHub-reviewed advisories. The `ghsa` view
+returns the latest row per GHSA ID. Numeric `cvss` is computed from the vector.
 
-`cwe_history(cwe_id, entry_type, name, abstraction, status, description,
-likelihood_of_exploit, relations STRUCT(nature, target_id)[], cwe_version,
-release_date DATE)` — versioned snapshots of the CWE catalog (weaknesses,
-categories and views, told apart by `entry_type`). The `cwe` view returns the
-snapshot with the latest `release_date`; join it against the `cwe` array
-columns of `cve` / `ghsa` / `nuclei`. Deprecated entries remain with
-`status = 'Deprecated'`.
+| Column | Type | Description |
+|---|---|---|
+| `ghsa` | VARCHAR | GHSA ID |
+| `cve` | VARCHAR | Linked CVE ID (may be NULL) |
+| `summary` | VARCHAR | Short advisory summary |
+| `severity` | VARCHAR | Qualitative severity |
+| `cvss` | DOUBLE | CVSS base score (computed from vector) |
+| `cvss_version` | VARCHAR | CVSS version |
+| `cvss_vector` | VARCHAR | CVSS vector string |
+| `cwe` | VARCHAR[] | Associated CWE IDs (join to `cwe`) |
+| `affected` | STRUCT(ecosystem, package, introduced, fixed, last_affected)[] | Affected package/version ranges; `UNNEST` to expand |
+| `published` | TIMESTAMP | Publication time |
+| `modified` | TIMESTAMP | Last modification (also the view's latest-row key) |
+| `withdrawn` | TIMESTAMP | Withdrawal time, or NULL |
+| `raw` | VARCHAR | Full OSV JSON record |
 
-Layout: `cwe/version=<ver>/cwe-<ver>.parquet` — one full snapshot per CWE
-release (a few per year). No backfill: the first `update cwe` loads the whole
-current catalog. `cwe/last-modified.txt` stores the upstream `Last-Modified`
-value used for conditional GETs.
+### `exploitdb` / `exploitdb_history` — Exploit Database index
 
-`kev_history(cve, vendor_project, product, vulnerability_name,
-short_description, required_action, known_ransomware_campaign_use, notes,
-cwe VARCHAR[], date_added DATE, due_date DATE, fetched_date DATE,
-removed BOOLEAN)` — append-only history of the CISA Known Exploited
-Vulnerabilities catalog. KEV records carry no modification timestamp
-(`date_added` never changes after listing), so changes are detected by
-comparing every field against the catalog's latest row. Records withdrawn by
-CISA get a tombstone row with `removed = true` carrying the last known
-values. The `kev` view returns the latest row per `cve`.
+Append-only index history from `files_exploits.csv`. The `exploitdb` view
+returns the latest row per `edb_id` (by `date_updated`). Exploit code is not
+redistributed — `code_url` links to it.
 
-Layout: `kev/updates/year=YYYY/kev-updates-YYYY-MM-DD.parquet` (daily deltas;
-the first run is the full load — there is no backfill for kev).
+| Column | Type | Description |
+|---|---|---|
+| `edb_id` | INTEGER | Exploit-DB entry ID |
+| `cve` | VARCHAR[] | Linked CVE IDs |
+| `description` | VARCHAR | Exploit title |
+| `type` | VARCHAR | Exploit type (e.g. `remote`, `webapps`) |
+| `platform` | VARCHAR | Target platform |
+| `author` | VARCHAR | Author |
+| `port` | INTEGER | Target port, if applicable |
+| `verified` | BOOLEAN | Whether OffSec verified the exploit |
+| `tags` | VARCHAR | Tags |
+| `aliases` | VARCHAR | Aliases |
+| `codes` | VARCHAR | External reference codes |
+| `file` | VARCHAR | Source path within the Exploit-DB repo |
+| `code_url` | VARCHAR | Link to the exploit code |
+| `source_url` | VARCHAR | Source reference URL |
+| `application_url` | VARCHAR | Vulnerable application download URL |
+| `screenshot_url` | VARCHAR | Screenshot URL |
+| `date_published` | DATE | Publication date |
+| `date_added` | DATE | Date added to Exploit-DB |
+| `date_updated` | DATE | Last update (also the view's latest-row key) |
+
+### `nuclei` / `nuclei_history` — nuclei-templates index
+
+Append-only index of nuclei-templates `info` blocks. Templates carry no
+upstream modification timestamp, so changes are detected by `digest` (SHA-256
+of the template with its signature line stripped). The `nuclei` view returns
+the latest row per `template_id`; disappeared templates become **tombstones**
+(`removed = true`). `epss_score` / `epss_percentile` are snapshots embedded at
+authoring time — the `epss` table is the source of truth for current scores.
+
+| Column | Type | Description |
+|---|---|---|
+| `template_id` | VARCHAR | Template ID |
+| `name` | VARCHAR | Template name |
+| `severity` | VARCHAR | Severity |
+| `description` | VARCHAR | Description |
+| `author` | VARCHAR[] | Authors |
+| `tags` | VARCHAR[] | Tags |
+| `reference` | VARCHAR[] | Reference URLs |
+| `cve` | VARCHAR[] | Linked CVE IDs |
+| `cwe` | VARCHAR[] | Associated CWE IDs (join to `cwe`) |
+| `cvss_score` | DOUBLE | CVSS base score (as authored) |
+| `cvss_metrics` | VARCHAR | CVSS vector string |
+| `epss_score` | DOUBLE | EPSS score snapshot (as authored) |
+| `epss_percentile` | DOUBLE | EPSS percentile snapshot (as authored) |
+| `cpe` | VARCHAR | CPE string |
+| `vendor` | VARCHAR | Vendor |
+| `product` | VARCHAR | Product |
+| `verified` | BOOLEAN | Whether the template is verified |
+| `type` | VARCHAR | Protocol/type (e.g. `http`) |
+| `file` | VARCHAR | Source path within nuclei-templates |
+| `template_url` | VARCHAR | Link to the template |
+| `digest` | VARCHAR | SHA-256 change-detection digest |
+| `fetched_date` | DATE | Fetch date (also the view's latest-row key) |
+| `removed` | BOOLEAN | Tombstone flag (`true` = gone upstream) |
+
+### `cwe` / `cwe_history` — CWE catalog
+
+Versioned snapshots of the CWE catalog (weaknesses, categories and views, told
+apart by `entry_type`). The `cwe` view returns the snapshot with the latest
+`release_date`; join it against the `cwe` array columns of `cve` / `ghsa` /
+`nuclei`. Deprecated entries remain with `status = 'Deprecated'`.
+
+| Column | Type | Description |
+|---|---|---|
+| `cwe_id` | VARCHAR | CWE ID (e.g. `CWE-79`) |
+| `entry_type` | VARCHAR | `weakness` / `category` / `view` |
+| `name` | VARCHAR | Entry name |
+| `abstraction` | VARCHAR | Abstraction level (e.g. `Base`, `Class`) |
+| `status` | VARCHAR | Status (e.g. `Stable`, `Deprecated`) |
+| `description` | VARCHAR | Description |
+| `likelihood_of_exploit` | VARCHAR | Likelihood of exploit |
+| `relations` | STRUCT(nature, target_id)[] | Relationships to other CWEs |
+| `cwe_version` | VARCHAR | CWE catalog version |
+| `release_date` | DATE | Snapshot release date (also the view's latest-row key) |
+
+### `kev` / `kev_history` — CISA Known Exploited Vulnerabilities
+
+Append-only history of the CISA KEV catalog. KEV records carry no modification
+timestamp (`date_added` never changes after listing), so changes are detected
+by comparing every field against the catalog's latest row. The `kev` view
+returns the latest row per `cve`; withdrawn records become **tombstones**
+(`removed = true`).
+
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `vendor_project` | VARCHAR | Vendor / project |
+| `product` | VARCHAR | Product |
+| `vulnerability_name` | VARCHAR | Vulnerability name |
+| `short_description` | VARCHAR | Short description |
+| `required_action` | VARCHAR | Required remediation action |
+| `known_ransomware_campaign_use` | VARCHAR | Whether tied to known ransomware use |
+| `notes` | VARCHAR | Notes / reference URLs |
+| `cwe` | VARCHAR[] | Associated CWE IDs (join to `cwe`) |
+| `date_added` | DATE | Date added to KEV |
+| `due_date` | DATE | Federal remediation due date |
+| `fetched_date` | DATE | Fetch date (also the view's latest-row key) |
+| `removed` | BOOLEAN | Tombstone flag (`true` = withdrawn by CISA) |
+
+### `datasets` — data sources & licenses
+
+A view describing each dataset's provenance. See
+[DATA_LICENSES.md](DATA_LICENSES.md).
+
+| Column | Type | Description |
+|---|---|---|
+| `name` | VARCHAR | Dataset name |
+| `source_url` | VARCHAR | Upstream source URL |
+| `license_name` | VARCHAR | License identifier/name |
+| `license_text` | VARCHAR | License text or license URL |
+| `attribution` | VARCHAR | Required attribution text |
+| `disclaimer` | VARCHAR | Source-specific disclaimer / endorsement notice |
+
+### Storage layout
+
+Data files are plain Parquet, readable directly (see [Query it](#query-it)).
+Consumers who only use the DuckLake catalog can skip this.
+
+| Dataset | Backfill / full snapshot files | Update files | Notes |
+|---|---|---|---|
+| `epss` | `epss/year=YYYY/epss-YYYY.parquet` | `epss/year=YYYY/epss-YYYY-MM-DD.parquet` (current year only) | Closed years consolidated into one per-year file, sorted by `cve, date`; day-level URLs exist only for the current year, year-level globs work for all |
+| `cve` | `cve/year=YYYY/cve-YYYY.parquet` | `cve/updates/year=YYYY/cve-updates-YYYY-MM-DD.parquet` | Snapshot partitioned by CVE-ID year, sorted by `cve`; deltas = records whose `dateUpdated` advanced past the catalog's max |
+| `ghsa` | `ghsa/year=YYYY/ghsa-YYYY.parquet` | `ghsa/updates/year=YYYY/ghsa-updates-YYYY-MM-DD.parquet` | Snapshot partitioned by published year, sorted by `ghsa`; deltas dated by run date |
+| `exploitdb` | `exploitdb/year=YYYY/exploitdb-YYYY.parquet` | `exploitdb/updates/year=YYYY/exploitdb-updates-YYYY-MM-DD.parquet` | Snapshot partitioned by `date_published` year, sorted by `edb_id`; deltas dated by run date |
+| `nuclei` | *(none)* | `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
+| `cwe` | *(none)* | `cwe/version=<ver>/cwe-<ver>.parquet` | One full snapshot per CWE release (a few per year); `cwe/last-modified.txt` stores the upstream `Last-Modified` for conditional GETs |
+| `kev` | *(none)* | `kev/updates/year=YYYY/kev-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
 
 ## Build your own lake
 
