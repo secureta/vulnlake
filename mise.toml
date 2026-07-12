@@ -1,0 +1,26 @@
+[tools]
+# pyproject.toml の requires-python に合わせる
+python = "3.14.6"
+# 依存解決・実行は AGENTS.md / GitHub Actions と同じく uv を使う
+uv = "0.11.28"
+# GitHub Actions lint は CI と同じバージョンを使う
+actionlint = "1.7.12"
+
+[tasks.lint]
+description = "Ruff と actionlint で lint を実行する"
+run = [
+  "uv run ruff check --select E4,E7,E9,F,I,B,UP .",
+  "uv run ruff format --check .",
+  "actionlint",
+]
+
+[tasks.sast]
+description = "Ruff S ルールと zizmor で SAST を実行する"
+run = [
+  "uv run ruff check --select S .",
+  "uv run zizmor --no-progress .github/workflows/",
+]
+
+[tasks.pre-commit]
+description = "commit 前 gate: lint と SAST を必ず実行する"
+run = "mise run lint && mise run sast"

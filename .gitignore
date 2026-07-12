@@ -6,7 +6,7 @@ dist/
 *.ducklake
 *.ducklake.wal
 
-# プロジェクト共有の pi / Claude Code スキルだけはコミット対象にする
+# プロジェクト共有の pi / Claude Code / Codex 系スキルだけはコミット対象にする
 # (グローバル gitignore が .* でドットディレクトリを除外する環境でも共有できるようにする)
 !.pi/
 .pi/*
@@ -16,3 +16,7 @@ dist/
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+!.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
