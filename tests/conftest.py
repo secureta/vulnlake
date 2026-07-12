@@ -6,6 +6,7 @@ import tarfile
 import zipfile
 from datetime import date
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import yaml
 
@@ -373,3 +374,155 @@ def make_kev_json(
             "vulnerabilities": records,
         }
     ).encode()
+
+
+def _cwe_attr(value: str) -> str:
+    """XML 属性値用エスケープ (ダブルクォート含む)。"""
+    return escape(value, {'"': "&quot;"})
+
+
+def _cwe_weakness_xml(w: dict) -> str:
+    rels = "".join(
+        f'<Related_Weakness Nature="{n}" CWE_ID="{cid}" View_ID="{vid}"/>'
+        for n, cid, vid in w.get("relations", ())
+    )
+    related = f"<Related_Weaknesses>{rels}</Related_Weaknesses>" if rels else ""
+    likelihood = (
+        f"<Likelihood_Of_Exploit>{w['likelihood']}</Likelihood_Of_Exploit>"
+        if w.get("likelihood")
+        else ""
+    )
+    return (
+        f'<Weakness ID="{w["id"]}" Name="{_cwe_attr(w.get("name", "Weakness"))}" '
+        f'Abstraction="{w.get("abstraction", "Base")}" Structure="Simple" '
+        f'Status="{w.get("status", "Stable")}">'
+        f"<Description>{escape(w.get('description', 'A sample weakness.'))}</Description>"
+        f"{related}{likelihood}</Weakness>"
+    )
+
+
+def _cwe_category_xml(c: dict) -> str:
+    members = "".join(
+        f'<Has_Member CWE_ID="{cid}" View_ID="{c["id"]}"/>'
+        for cid in c.get("members", ())
+    )
+    relationships = f"<Relationships>{members}</Relationships>" if members else ""
+    return (
+        f'<Category ID="{c["id"]}" Name="{_cwe_attr(c.get("name", "Category"))}" '
+        f'Status="{c.get("status", "Draft")}">'
+        f"<Summary>{escape(c.get('summary', 'A sample category.'))}</Summary>"
+        f"{relationships}</Category>"
+    )
+
+
+def _cwe_view_xml(v: dict) -> str:
+    members = "".join(
+        f'<Has_Member CWE_ID="{cid}" View_ID="{v["id"]}"/>'
+        for cid in v.get("members", ())
+    )
+    members_block = f"<Members>{members}</Members>" if members else ""
+    return (
+        f'<View ID="{v["id"]}" Name="{_cwe_attr(v.get("name", "View"))}" '
+        f'Type="Graph" Status="{v.get("status", "Draft")}">'
+        f"<Objective>{escape(v.get('objective', 'A sample view.'))}</Objective>"
+        f"{members_block}</View>"
+    )
+
+
+def make_cwe_xml_zip(
+    *,
+    version: str = "4.20",
+    date_str: str = "2026-04-30",
+    weaknesses: list[dict] | None = None,
+    categories: list[dict] | None = None,
+    views: list[dict] | None = None,
+) -> bytes:
+    """実フォーマットを模した cwec XML zip を作る。
+
+    デフォルトは弱点3件 (CWE-79 / CWE-74 / Deprecated の CWE-1187) +
+    カテゴリ1件 (CWE-137) + ビュー1件 (CWE-1000) = 5 エントリ。
+    CWE-79 の ChildOf 74 は実データ同様 View_ID 違いで重複させてある
+    (パーサの dedupe を検証するため)。
+    """
+    if weaknesses is None:
+        weaknesses = [
+            {
+                "id": "79",
+                "name": (
+                    "Improper Neutralization of Input During Web Page "
+                    "Generation ('Cross-site Scripting')"
+                ),
+                "abstraction": "Base",
+                "status": "Stable",
+                "description": (
+                    "The product does not neutralize user-controllable input "
+                    "before it is placed in output used as a web page."
+                ),
+                "likelihood": "High",
+                "relations": [
+                    ("ChildOf", "74", "1000"),
+                    ("ChildOf", "74", "1003"),
+                    ("PeerOf", "352", "1000"),
+                ],
+            },
+            {
+                "id": "74",
+                "name": (
+                    "Improper Neutralization of Special Elements in Output "
+                    "Used by a Downstream Component ('Injection')"
+                ),
+                "abstraction": "Class",
+                "status": "Draft",
+                "description": "A sample injection class weakness.",
+                "relations": [("ChildOf", "707", "1000")],
+            },
+            {
+                "id": "1187",
+                "name": "DEPRECATED: Use of Uninitialized Resource",
+                "abstraction": "Base",
+                "status": "Deprecated",
+                "description": (
+                    "This entry has been deprecated because it was a "
+                    "duplicate of CWE-908."
+                ),
+            },
+        ]
+    if categories is None:
+        categories = [
+            {
+                "id": "137",
+                "name": "Data Neutralization Issues",
+                "status": "Draft",
+                "summary": (
+                    "Weaknesses in this category are related to the creation "
+                    "or neutralization of data using an incorrect format."
+                ),
+                "members": ["74", "79"],
+            }
+        ]
+    if views is None:
+        views = [
+            {
+                "id": "1000",
+                "name": "Research Concepts",
+                "status": "Draft",
+                "objective": (
+                    "This view is intended to facilitate research into weaknesses."
+                ),
+                "members": ["74"],
+            }
+        ]
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Weakness_Catalog Name="CWE" Version="{version}" Date="{date_str}" '
+        'xmlns="http://cwe.mitre.org/cwe-7" '
+        'xmlns:xhtml="http://www.w3.org/1999/xhtml">'
+        f"<Weaknesses>{''.join(_cwe_weakness_xml(w) for w in weaknesses)}</Weaknesses>"
+        f"<Categories>{''.join(_cwe_category_xml(c) for c in categories)}</Categories>"
+        f"<Views>{''.join(_cwe_view_xml(v) for v in views)}</Views>"
+        "</Weakness_Catalog>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"cwec_v{version}.xml", xml)
+    return buf.getvalue()

@@ -114,6 +114,19 @@ the source of truth for current scores.
 Layout: `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` (daily
 deltas; the first run is the full load — there is no backfill for nuclei).
 
+`cwe_history(cwe_id, entry_type, name, abstraction, status, description,
+likelihood_of_exploit, relations STRUCT(nature, target_id)[], cwe_version,
+release_date DATE)` — versioned snapshots of the CWE catalog (weaknesses,
+categories and views, told apart by `entry_type`). The `cwe` view returns the
+snapshot with the latest `release_date`; join it against the `cwe` array
+columns of `cve` / `ghsa` / `nuclei`. Deprecated entries remain with
+`status = 'Deprecated'`.
+
+Layout: `cwe/version=<ver>/cwe-<ver>.parquet` — one full snapshot per CWE
+release (a few per year). No backfill: the first `update cwe` loads the whole
+current catalog. `cwe/last-modified.txt` stores the upstream `Last-Modified`
+value used for conditional GETs.
+
 `kev_history(cve, vendor_project, product, vulnerability_name,
 short_description, required_action, known_ransomware_campaign_use, notes,
 cwe VARCHAR[], date_added DATE, due_date DATE, fetched_date DATE,
@@ -150,6 +163,7 @@ uv run vlake update cve
 uv run vlake update ghsa
 uv run vlake update exploitdb
 uv run vlake update nuclei  # no backfill: the first run does a full load
+uv run vlake update cwe     # no backfill: snapshot per CWE release
 uv run vlake update kev     # no backfill: the first run does a full load
 uv run vlake verify
 ```

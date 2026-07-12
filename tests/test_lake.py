@@ -274,3 +274,22 @@ def test_kev_latest_rows_and_view(tmp_path):
         assert got == [("CVE-2024-0001", "v2"), ("CVE-2024-0002", "v3")]
     finally:
         lake.close()
+
+
+def test_cwe_view_returns_latest_snapshot(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cwe_history "  # noqa: S608
+            "(cwe_id, entry_type, cwe_version, release_date) VALUES "
+            "('CWE-79', 'weakness', '4.9', DATE '2025-11-19'), "
+            "('CWE-79', 'weakness', '4.20', DATE '2026-04-30'), "
+            "('CWE-9999', 'weakness', '4.9', DATE '2025-11-19')"
+        )
+        lake.refresh_cwe_view()
+        # 文字列比較では '4.9' > '4.20' になるが、release_date 最大の断面が返る
+        got = lake.query("SELECT cwe_id, cwe_version FROM lake.cwe")
+        assert got == [("CWE-79", "4.20")]
+    finally:
+        lake.close()

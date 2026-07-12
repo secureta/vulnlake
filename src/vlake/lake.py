@@ -149,6 +149,20 @@ class Lake:
                 removed BOOLEAN
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.cwe_history (
+                cwe_id VARCHAR,
+                entry_type VARCHAR,
+                name VARCHAR,
+                abstraction VARCHAR,
+                status VARCHAR,
+                description VARCHAR,
+                likelihood_of_exploit VARCHAR,
+                relations STRUCT(nature VARCHAR, target_id VARCHAR)[],
+                cwe_version VARCHAR,
+                release_date DATE
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -275,6 +289,18 @@ class Lake:
             f"SELECT * FROM {self.ALIAS}.kev_history "
             f"QUALIFY row_number() OVER "
             f"(PARTITION BY cve ORDER BY fetched_date DESC) = 1"
+        )
+
+    def refresh_cwe_view(self) -> None:
+        """release_date 最大のバージョン断面 (全エントリ) を返す view。
+
+        cwe_version の文字列比較は '4.9' > '4.20' となるため使わない。
+        """
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.cwe AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.cwe_history WHERE release_date = "
+            f"(SELECT max(release_date) FROM {self.ALIAS}.cwe_history)"
         )
 
     def add_file(self, table: str, path: str) -> bool:
