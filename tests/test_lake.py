@@ -250,3 +250,27 @@ def test_nuclei_latest_rows_and_view(tmp_path):
         assert got == [("tpl-a", "d2"), ("tpl-b", "d3")]
     finally:
         lake.close()
+
+
+def test_kev_latest_rows_and_view(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        assert lake.kev_latest_rows() == []
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.kev_history "  # noqa: S608
+            "(cve, vendor_project, fetched_date, removed) VALUES "
+            "('CVE-2024-0001', 'v1', DATE '2026-07-10', false), "
+            "('CVE-2024-0001', 'v2', DATE '2026-07-12', false), "
+            "('CVE-2024-0002', 'v3', DATE '2026-07-10', true)"
+        )
+        rows = {r["cve"]: r for r in lake.kev_latest_rows()}
+        assert rows["CVE-2024-0001"]["vendor_project"] == "v2"  # 最新 fetched_date の行
+        assert rows["CVE-2024-0002"]["removed"] is True
+        assert rows["CVE-2024-0001"]["product"] is None  # 未指定列も列名付きで返る
+
+        lake.refresh_kev_view()
+        got = lake.query("SELECT cve, vendor_project FROM lake.kev ORDER BY cve")
+        assert got == [("CVE-2024-0001", "v2"), ("CVE-2024-0002", "v3")]
+    finally:
+        lake.close()

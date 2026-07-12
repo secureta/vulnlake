@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss, exploitdb, ghsa, nuclei
+from . import cvelist, epss, exploitdb, ghsa, kev, nuclei
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -72,12 +72,14 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
             ghsa.LICENSE_INFO,
             exploitdb.LICENSE_INFO,
             nuclei.LICENSE_INFO,
+            kev.LICENSE_INFO,
         ]
     )
     lake.refresh_cve_view()
     lake.refresh_ghsa_view()
     lake.refresh_exploitdb_view()
     lake.refresh_nuclei_view()
+    lake.refresh_kev_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -573,6 +575,65 @@ def update_nuclei(cfg: Config, today: date | None = None) -> str:
     return f"published {run_date} ({len(rows)} records, {bad} bad)"
 
 
+def update_kev(cfg: Config, today: date | None = None) -> str:
+    """最新フィード断面とカタログ latest のフィールド比較差分だけを追記する。
+
+    KEV はレコード単位の更新日時が無く、dateAdded は追記後の修正で変わらない
+    ため、latest 行との全フィールド比較で差分を検出する。カタログが空なら
+    全件が新規となるため backfill は存在しない (初回 update が全量投入)。
+    上流から消えた cve は最終値を引き継いだ removed=true のトゥームストーン行を
+    追記する。フィードの dateReleased は再署名でも変わるため日次キーには
+    実行日 (UTC) を使う。today はテスト用の注入点 (省略時は実日付)。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = kev.key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            feed_path = workdir / "known_exploited_vulnerabilities.json"
+            kev.download(kev.FEED_URL, feed_path)
+            parsed, bad = kev.parse_catalog(feed_path.read_bytes())
+            # 同一 cve は最初の1件を採用 (上流は一意を保証、保険)
+            current: dict[str, dict] = {}
+            for row in parsed:
+                current.setdefault(row["cve"], row)
+            latest = {r["cve"]: r for r in lake.kev_latest_rows()}
+            active = sum(1 for r in latest.values() if not r["removed"])
+            if latest and len(current) * 2 < active:
+                # 断面の異常縮小は大量トゥームストーンを誤生成するため中断する
+                raise RuntimeError(
+                    f"refusing to ingest: snapshot has {len(current)} records, "
+                    f"less than half of {active} active in catalog"
+                )
+            rows = []
+            for cve_id, row in current.items():
+                prev = latest.get(cve_id)
+                if (
+                    prev is None
+                    or prev["removed"]
+                    or any(prev[k] != v for k, v in row.items())
+                ):
+                    rows.append({**row, "fetched_date": run_date, "removed": False})
+            for cve_id, prev in latest.items():
+                if cve_id not in current and not prev["removed"]:
+                    rows.append({**prev, "fetched_date": run_date, "removed": True})
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            kev.write_parquet(kev.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"kev updates {run_date} ({len(rows)} records)")
+            lake.add_file("kev_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records, {bad} bad)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
@@ -582,6 +643,7 @@ def rebuild_catalog(cfg: Config) -> str:
         "ghsa/": "ghsa_history",
         "exploitdb/": "exploitdb_history",
         "nuclei/": "nuclei_history",
+        "kev/": "kev_history",
     }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
@@ -614,6 +676,7 @@ _EXPLOITDB_UPDATE_KEY_DATE = re.compile(
     r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
 _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -776,6 +839,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="nuclei_history",
                     ts_column="fetched_date",
                     update_key_re=_NUCLEI_UPDATE_KEY_DATE,
+                ),
+                "kev": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="kev/",
+                    table="kev_history",
+                    ts_column="fetched_date",
+                    update_key_re=_KEV_UPDATE_KEY_DATE,
                 ),
             }
         finally:

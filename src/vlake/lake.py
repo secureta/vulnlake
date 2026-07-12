@@ -132,6 +132,23 @@ class Lake:
                 removed BOOLEAN
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.kev_history (
+                cve VARCHAR,
+                vendor_project VARCHAR,
+                product VARCHAR,
+                vulnerability_name VARCHAR,
+                short_description VARCHAR,
+                required_action VARCHAR,
+                known_ransomware_campaign_use VARCHAR,
+                notes VARCHAR,
+                cwe VARCHAR[],
+                date_added DATE,
+                due_date DATE,
+                fetched_date DATE,
+                removed BOOLEAN
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -233,6 +250,31 @@ class Lake:
             f"SELECT * FROM {self.ALIAS}.nuclei_history "
             f"QUALIFY row_number() OVER "
             f"(PARTITION BY template_id ORDER BY fetched_date DESC) = 1"
+        )
+
+    def kev_latest_rows(self) -> list[dict]:
+        """cve ごと fetched_date 最新の1行を列名付き dict で返す (空なら [])。
+
+        KEV はレコード単位の更新日時が無いため、update の差分検出と
+        トゥームストーン生成 (最終値の引き継ぎ) にこの全行スナップショットを使う。
+        """
+        cur = self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT * FROM {self.ALIAS}.kev_history "  # noqa: S608
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY cve ORDER BY fetched_date DESC) = 1"
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+
+    def refresh_kev_view(self) -> None:
+        """cve ごとに fetched_date 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.kev AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.kev_history "
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY cve ORDER BY fetched_date DESC) = 1"
         )
 
     def add_file(self, table: str, path: str) -> bool:

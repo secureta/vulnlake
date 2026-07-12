@@ -15,7 +15,7 @@ def main() -> None:
 
 @main.command()
 @click.argument(
-    "dataset", type=click.Choice(["epss", "cve", "ghsa", "exploitdb", "nuclei"])
+    "dataset", type=click.Choice(["epss", "cve", "ghsa", "exploitdb", "nuclei", "kev"])
 )
 @click.option(
     "--date",
@@ -25,7 +25,7 @@ def main() -> None:
     help="取得する日付 (epss のみ。省略時は最新)",
 )
 def update(dataset: str, target) -> None:
-    """日次更新 (冪等)。nuclei は backfill 不要 (初回 update が全量投入)。"""
+    """日次更新 (冪等)。nuclei / kev は backfill 不要 (初回 update が全量投入)。"""
     cfg = Config.from_env()
     if dataset == "epss":
         click.echo(pipeline.update_epss(cfg, target.date() if target else None))
@@ -39,6 +39,7 @@ def update(dataset: str, target) -> None:
         "ghsa": pipeline.update_ghsa,
         "exploitdb": pipeline.update_exploitdb,
         "nuclei": pipeline.update_nuclei,
+        "kev": pipeline.update_kev,
     }
     result = updaters[dataset](cfg)
     click.echo(result)

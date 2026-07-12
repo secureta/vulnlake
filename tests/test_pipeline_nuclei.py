@@ -79,7 +79,7 @@ def test_update_nuclei_initial_full_load(cfg, tmp_path, monkeypatch):
         "http/cves/2024/CVE-2024-0001.yaml",
     )
     names = {r[0] for r in con.execute("SELECT name FROM frozen.datasets").fetchall()}
-    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei"}
+    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei", "kev"}
 
     # 同日の再実行は skip、翌日は差分なし
     assert (

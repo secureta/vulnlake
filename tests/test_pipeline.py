@@ -36,7 +36,7 @@ def test_update_publish_and_idempotency(cfg, monkeypatch):
 
     con = _attach(cfg)
     assert con.execute("SELECT count(*) FROM frozen.epss").fetchone()[0] == 1
-    assert con.execute("SELECT count(*) FROM frozen.datasets").fetchone()[0] == 5
+    assert con.execute("SELECT count(*) FROM frozen.datasets").fetchone()[0] == 6
 
 
 def test_update_not_published_yet(cfg, monkeypatch):
