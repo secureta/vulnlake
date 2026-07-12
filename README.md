@@ -19,6 +19,7 @@ ATTACH 'ducklake:https://vlake.reta.work/vlake.ducklake' AS vlake;
 SELECT * FROM vlake.epss WHERE cve = 'CVE-2021-44228' ORDER BY date;
 SELECT cve, title, cvss, cvss_severity FROM vlake.cve WHERE cve = 'CVE-2021-44228';
 SELECT * FROM vlake.cve_history WHERE cve = 'CVE-2021-44228' ORDER BY date_updated;
+SELECT * FROM vlake.cve_sources WHERE cve = 'CVE-2021-44228';
 SELECT ghsa, summary, severity FROM vlake.ghsa WHERE cve = 'CVE-2021-44228';
 SELECT ghsa, a.package, a.introduced, a.fixed
 FROM vlake.ghsa, UNNEST(affected) AS t(a) WHERE a.ecosystem = 'npm';
@@ -65,6 +66,7 @@ separate view.
 |---|---|---|---|
 | `epss` | `epss` | CVE × date | EPSS exploit-prediction scores (full daily history) |
 | `cve` | `cve_history` | CVE | CVE List V5 records (MITRE/CNA) |
+| `cve_sources` | *(view)* | CVE | Cross-dataset presence summary for each CVE |
 | `ghsa` | `ghsa_history` | GHSA ID | GitHub-reviewed advisories with affected package ranges |
 | `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
@@ -107,6 +109,27 @@ returns the latest row per CVE.
 | `date_reserved` | TIMESTAMP | CVE ID reservation |
 | `date_updated` | TIMESTAMP | Last update (also the view's latest-row key) |
 | `raw` | VARCHAR | Full CVE JSON 5.x record |
+
+### `cve_sources` — cross-dataset CVE presence
+
+Summary view for quickly checking which public datasets contain data for a CVE.
+It is derived from `epss`, `cve`, `ghsa`, `exploitdb`, `nuclei`, and `kev`.
+For tombstone-backed views (`nuclei`, `kev`), only rows with `removed = false`
+count as present.
+
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `has_epss` | BOOLEAN | Whether `epss` has at least one score row |
+| `has_cve` | BOOLEAN | Whether the `cve` latest view has a row |
+| `has_ghsa` | BOOLEAN | Whether the `ghsa` latest view has at least one linked advisory |
+| `has_exploitdb` | BOOLEAN | Whether the `exploitdb` latest view has at least one linked entry |
+| `has_nuclei` | BOOLEAN | Whether the `nuclei` latest view has at least one currently-live linked template |
+| `has_kev` | BOOLEAN | Whether the `kev` latest view has a currently-live row |
+| `epss_days` | BIGINT | Number of EPSS score days |
+| `ghsa_count` | BIGINT | Number of linked GHSA advisories |
+| `exploitdb_count` | BIGINT | Number of linked ExploitDB entries |
+| `nuclei_count` | BIGINT | Number of linked currently-live nuclei templates |
 
 ### `ghsa` / `ghsa_history` — GitHub Advisory Database
 

@@ -30,6 +30,19 @@ DATASETS_COLUMNS = [
     ("attribution", "VARCHAR"),
     ("disclaimer", "VARCHAR"),
 ]
+CVE_SOURCES_COLUMNS = [
+    ("cve", "VARCHAR"),
+    ("has_epss", "BOOLEAN"),
+    ("has_cve", "BOOLEAN"),
+    ("has_ghsa", "BOOLEAN"),
+    ("has_exploitdb", "BOOLEAN"),
+    ("has_nuclei", "BOOLEAN"),
+    ("has_kev", "BOOLEAN"),
+    ("epss_days", "BIGINT"),
+    ("ghsa_count", "BIGINT"),
+    ("exploitdb_count", "BIGINT"),
+    ("nuclei_count", "BIGINT"),
+]
 
 
 def normalize_struct_fields(fields: str) -> str:
@@ -158,6 +171,7 @@ def main() -> int:
         if table in HISTORY_TO_SECTION
     }
     expected["datasets"] = DATASETS_COLUMNS
+    expected["cve_sources"] = CVE_SOURCES_COLUMNS
     actual = parse_readme_tables()
 
     ok = True
