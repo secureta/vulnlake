@@ -224,3 +224,29 @@ def test_exploitdb_history_and_latest_view(tmp_path):
         "SELECT edb_id FROM frozen.exploitdb WHERE list_contains(cve, 'CVE-2010-0001')"
     ).fetchone()[0]
     assert hit == 42
+
+
+def test_nuclei_latest_rows_and_view(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        assert lake.nuclei_latest_rows() == []
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.nuclei_history "  # noqa: S608
+            "(template_id, digest, file, fetched_date, removed) VALUES "
+            "('tpl-a', 'd1', 'http/a.yaml', DATE '2026-07-10', false), "
+            "('tpl-a', 'd2', 'http/a.yaml', DATE '2026-07-12', false), "
+            "('tpl-b', 'd3', 'http/b.yaml', DATE '2026-07-10', true)"
+        )
+        rows = {r["template_id"]: r for r in lake.nuclei_latest_rows()}
+        assert rows["tpl-a"]["digest"] == "d2"  # 最新 fetched_date の行
+        assert rows["tpl-b"]["removed"] is True
+        assert rows["tpl-a"]["name"] is None  # 未指定列も列名付きで返る
+
+        lake.refresh_nuclei_view()
+        got = lake.query(
+            "SELECT template_id, digest FROM lake.nuclei ORDER BY template_id"
+        )
+        assert got == [("tpl-a", "d2"), ("tpl-b", "d3")]
+    finally:
+        lake.close()

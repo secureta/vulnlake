@@ -105,6 +105,33 @@ class Lake:
                 date_updated DATE
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.nuclei_history (
+                template_id VARCHAR,
+                name VARCHAR,
+                severity VARCHAR,
+                description VARCHAR,
+                author VARCHAR[],
+                tags VARCHAR[],
+                reference VARCHAR[],
+                cve VARCHAR[],
+                cwe VARCHAR[],
+                cvss_score DOUBLE,
+                cvss_metrics VARCHAR,
+                epss_score DOUBLE,
+                epss_percentile DOUBLE,
+                cpe VARCHAR,
+                vendor VARCHAR,
+                product VARCHAR,
+                verified BOOLEAN,
+                type VARCHAR,
+                file VARCHAR,
+                template_url VARCHAR,
+                digest VARCHAR,
+                fetched_date DATE,
+                removed BOOLEAN
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -181,6 +208,31 @@ class Lake:
             f"CREATE OR REPLACE VIEW {self.ALIAS}.exploitdb AS "  # noqa: S608
             f"SELECT * FROM {self.ALIAS}.exploitdb_history "
             f"QUALIFY row_number() OVER (PARTITION BY edb_id ORDER BY date_updated DESC) = 1"
+        )
+
+    def nuclei_latest_rows(self) -> list[dict]:
+        """template_id ごと fetched_date 最新の1行を列名付き dict で返す (空なら [])。
+
+        nuclei は更新日時ウォーターマークが使えないため、update の差分検出と
+        トゥームストーン生成 (最終値の引き継ぎ) にこの全行スナップショットを使う。
+        """
+        cur = self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT * FROM {self.ALIAS}.nuclei_history "  # noqa: S608
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY template_id ORDER BY fetched_date DESC) = 1"
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+
+    def refresh_nuclei_view(self) -> None:
+        """template_id ごとに fetched_date 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.nuclei AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.nuclei_history "
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY template_id ORDER BY fetched_date DESC) = 1"
         )
 
     def add_file(self, table: str, path: str) -> bool:
