@@ -723,6 +723,12 @@ _EXPLOITDB_UPDATE_KEY_DATE = re.compile(
     r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
 _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+# ExploitDB の鮮度チェックはこの日数を下限とする (max_age_days が更に緩ければ従う)。
+# 検査対象の date_updated は上流の最終編集日で、OffSec は不定期にまとめて公開する
+# ため日次では動かない。daily 前提の max_age_days=3 では正常な数日の空白が
+# 誤検知になる (publish の false positive)。CWE ほど頻度は低くないので完全除外
+# ではなく、より緩い窓で本当の長期停止だけを捕まえる。
+_EXPLOITDB_MAX_AGE_DAYS = 14
 _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 # cwe のキーはバージョン断面 (cwe/version=<ver>/) で日付を含まないため常に不一致。
 # _verify_history の「max(ts) が日次キーに追随」検査は自然にスキップされる
@@ -764,6 +770,19 @@ def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict
 def _as_date(value):
     """TIMESTAMP は .date() を取り、DATE (datetime.date) はそのまま返す。"""
     return value.date() if isinstance(value, datetime) else value
+
+
+def _exploitdb_max_age(max_age_days: int | None) -> int | None:
+    """ExploitDB 用の鮮度しきい値。
+
+    date_updated は上流の最終編集日で、OffSec の公開は不定期のため数日空くのが
+    正常。daily 前提の max_age_days をそのまま使うと誤検知になるので、
+    _EXPLOITDB_MAX_AGE_DAYS を下限として緩める。呼び出し側が更に緩い値を
+    指定していればそれを尊重する。None (鮮度チェック無効) はそのまま透過する。
+    """
+    if max_age_days is None:
+        return None
+    return max(max_age_days, _EXPLOITDB_MAX_AGE_DAYS)
 
 
 def _verify_history(
@@ -875,7 +894,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                 "exploitdb": _verify_history(
                     storage,
                     lake,
-                    max_age_days,
+                    _exploitdb_max_age(max_age_days),
                     prefix="exploitdb/",
                     table="exploitdb_history",
                     ts_column="date_updated",
