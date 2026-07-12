@@ -77,6 +77,8 @@ LICENSE_INFO = {
 TARBALL_URL = "https://codeload.github.com/projectdiscovery/nuclei-templates/tar.gz/refs/heads/main"
 _BLOB_URL = "https://github.com/projectdiscovery/nuclei-templates/blob/main/{}"
 _CVE_RE = re.compile(r"CVE-\d{4}-\d+")
+# libyaml があれば C 実装の safe ローダを使う (フォールバックは pure-Python)
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 # ProjectDiscovery の署名行。再署名だけの変更を差分にしないため digest 計算から除く
 _SIGNATURE_RE = re.compile(rb"^# digest:.*\n?", re.MULTILINE)
 # テンプレートを含まないディレクトリ (リポジトリ相対)
@@ -147,7 +149,8 @@ def parse_template(relpath: str, raw: bytes) -> dict | None:
     パース不能・トップレベル id / info 欠落は None (非テンプレート YAML)。
     """
     try:
-        doc = yaml.safe_load(raw)
+        # safe 系ローダのみ使用 (libyaml があれば C 実装で ~1.2万ファイル/日を高速化)
+        doc = yaml.load(raw, Loader=_LOADER)  # noqa: S506
     except yaml.YAMLError:
         return None
     if not isinstance(doc, dict):
