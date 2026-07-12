@@ -325,3 +325,51 @@ def make_nuclei_tarball(
             info = tarfile.TarInfo(f"nuclei-templates-main/{rel}")
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
+
+
+def make_kev_record(
+    cve: str = "CVE-2021-44228",
+    *,
+    vendor_project: str = "Apache",
+    product: str = "Log4j2",
+    vulnerability_name: str = "Apache Log4j2 Remote Code Execution Vulnerability",
+    date_added: str = "2021-12-10",
+    short_description: str = "Log4j2 contains a JNDI injection vulnerability.",
+    required_action: str = "Apply updates per vendor instructions.",
+    due_date: str = "2021-12-24",
+    known_ransomware_campaign_use: str = "Known",
+    notes: str = "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+    cwes: list[str] | None = None,
+) -> dict:
+    """KEV カタログの vulnerabilities 配列 1 レコードを実フォーマットで模す。"""
+    return {
+        "cveID": cve,
+        "vendorProject": vendor_project,
+        "product": product,
+        "vulnerabilityName": vulnerability_name,
+        "dateAdded": date_added,
+        "shortDescription": short_description,
+        "requiredAction": required_action,
+        "dueDate": due_date,
+        "knownRansomwareCampaignUse": known_ransomware_campaign_use,
+        "notes": notes,
+        "cwes": ["CWE-917"] if cwes is None else cwes,
+    }
+
+
+def make_kev_json(
+    records: list[dict],
+    *,
+    catalog_version: str = "2026.07.10",
+    date_released: str = "2026-07-10T17:00:25.7327Z",
+) -> bytes:
+    """CISA KEV フィード JSON 全体を実フォーマットで模す。"""
+    return json.dumps(
+        {
+            "title": "CISA Catalog of Known Exploited Vulnerabilities",
+            "catalogVersion": catalog_version,
+            "dateReleased": date_released,
+            "count": len(records),
+            "vulnerabilities": records,
+        }
+    ).encode()
