@@ -7,6 +7,8 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
+import yaml
+
 
 def make_epss_csv_gz(
     score_date: date,
@@ -228,3 +230,98 @@ def make_exploitdb_csv(records: list[dict]) -> bytes:
     for rec in records:
         writer.writerow({c: rec.get(c, "") for c in _EXPLOITDB_COLUMNS})
     return buf.getvalue().encode()
+
+
+def make_nuclei_yaml(
+    template_id: str,
+    *,
+    name: str = "Sample Template",
+    severity: str | None = "critical",
+    description: str | None = "A sample detection template.",
+    author: str | list | None = "pdteam,researcher",
+    tags: str | None = "cve,rce",
+    reference: list | None = None,
+    cve_id: str | list | None = "CVE-2024-3400",
+    cwe_id: str | list | None = "CWE-20,CWE-77",
+    cvss_score: float | None = 10.0,
+    cvss_metrics: str | None = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    epss_score: float | None = 0.99999,
+    epss_percentile: float | None = 1.0,
+    cpe: str | None = "cpe:2.3:o:vendor:product:*:*:*:*:*:*:*:*",
+    vendor: str | None = "vendor",
+    product: str | None = "product",
+    verified: bool | None = True,
+    with_classification: bool = True,
+    with_metadata: bool = True,
+    protocol_key: str = "http",
+    body_marker: str = "v1",
+    with_signature: bool = True,
+) -> bytes:
+    """実フォーマットを模した nuclei テンプレート YAML を作る。
+
+    body_marker は本文差分の注入点 (変えると content_digest が変わる)。
+    with_signature=True で実テンプレート同様の末尾署名行 (# digest:) を付ける。
+    """
+    info: dict = {
+        "name": name,
+        "author": author,
+        "severity": severity,
+        "description": description,
+        "tags": tags,
+    }
+    info = {k: v for k, v in info.items() if v is not None}
+    if reference is None:
+        reference = ["https://example.com/advisory"]
+    if reference:
+        info["reference"] = reference
+    if with_classification:
+        cls = {
+            "cvss-metrics": cvss_metrics,
+            "cvss-score": cvss_score,
+            "cve-id": cve_id,
+            "cwe-id": cwe_id,
+            "epss-score": epss_score,
+            "epss-percentile": epss_percentile,
+            "cpe": cpe,
+        }
+        info["classification"] = {k: v for k, v in cls.items() if v is not None}
+    if with_metadata:
+        meta = {
+            "verified": verified,
+            "vendor": vendor,
+            "product": product,
+            "shodan-query": "http.favicon.hash:-631559155",
+        }
+        info["metadata"] = {k: v for k, v in meta.items() if v is not None}
+    doc = {"id": template_id, "info": info, protocol_key: [{"marker": body_marker}]}
+    text = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+    if with_signature:
+        text += f"# digest: 4a0adeadbeef{body_marker}\n"
+    return text.encode()
+
+
+def make_nuclei_tarball(
+    path: Path, files: dict[str, bytes], *, with_noise: bool = True
+) -> None:
+    """projectdiscovery/nuclei-templates の main tarball を模す (top dir 付き)。
+
+    files: リポジトリ相対パス → 内容。with_noise=True で除外対象
+    (.github/ helpers/ profiles/ と非 YAML) のダミーを混ぜる。
+    """
+    noise = (
+        {
+            ".github/workflows/ci.yml": b"name: ci\n",
+            "helpers/payloads/generic.yaml": b"payload: x\n",
+            "profiles/cves.yml": b"tags: [cve]\n",
+            "README.md": b"# nuclei-templates\n",
+            "cves.json": b"{}\n",
+        }
+        if with_noise
+        else {}
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w:gz") as tf:
+        for rel, data in {**files, **noise}.items():
+            info = tarfile.TarInfo(f"nuclei-templates-main/{rel}")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
