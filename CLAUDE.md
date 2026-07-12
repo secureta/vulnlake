@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-セキュリティデータセット (EPSS / CVE / GHSA / ExploitDB / nuclei-templates) を frozen DuckLake として
+セキュリティデータセット (EPSS / CVE / GHSA / ExploitDB / nuclei-templates / KEV) を frozen DuckLake として
 S3 互換ストレージに公開するツール。正式名は **vulnlake**(README タイトル・対外的な呼称)、
 略称は **vlake**(CLI コマンド、`VLAKE_*` 環境変数、`src/vlake/` パッケージ、
 ドメイン・カタログ名)。URL・CLI・コード内識別子の `vlake` を「不統一」としてリネーム提案しない。
@@ -26,7 +26,7 @@ CLI の動作確認はローカルモードで行う (S3 不要):
 
 ```bash
 export VLAKE_LOCAL_DIR=/tmp/vlake-test
-uv run vlake update epss         # dataset は epss|cve|ghsa|exploitdb|nuclei
+uv run vlake update epss         # dataset は epss|cve|ghsa|exploitdb|nuclei|kev
 uv run vlake backfill epss --source <dir>
 uv run vlake verify [--max-age-days N]
 uv run vlake rebuild-catalog     # VLAKE_PUBLIC_URL 変更後にカタログのパスを焼き直す
@@ -40,8 +40,8 @@ S3 モードは `VLAKE_S3_BUCKET` + `VLAKE_PUBLIC_URL`(+ `VLAKE_S3_ENDPOINT`, AW
 
 - **cli.py** — click のサブコマンド (`update` / `backfill` / `verify` / `rebuild-catalog`)。薄いラッパで、実体は pipeline へ委譲。
 - **pipeline.py** — オーケストレーション層。「取得 → Parquet 化 → アップロード → カタログ登録 → カタログ公開」の手順をデータセットごとに `update_*` / `backfill_*` として実装。`verify` はストレージとカタログの整合性を検査する。
-- **データセットモジュール** (epss.py / cvelist.py / ghsa.py / exploitdb.py / nuclei.py) — 各ソースの fetch / parse / PyArrow Table 化 / Parquet 書き出しと、ストレージキー命名 (`key_for` 等)。pipeline から呼ばれる純粋な変換ロジック。
-- **lake.py** — DuckLake カタログ (`vlake.ducklake`) への書き込みセッション。カタログはローカルファイルとして操作し、データファイルは `ducklake_add_data_files()` で絶対 URL を登録する。テーブル定義・latest ビュー (`cve` / `ghsa` / `exploitdb` / `nuclei`) の再生成もここ。
+- **データセットモジュール** (epss.py / cvelist.py / ghsa.py / exploitdb.py / nuclei.py / kev.py) — 各ソースの fetch / parse / PyArrow Table 化 / Parquet 書き出しと、ストレージキー命名 (`key_for` 等)。pipeline から呼ばれる純粋な変換ロジック。
+- **lake.py** — DuckLake カタログ (`vlake.ducklake`) への書き込みセッション。カタログはローカルファイルとして操作し、データファイルは `ducklake_add_data_files()` で絶対 URL を登録する。テーブル定義・latest ビュー (`cve` / `ghsa` / `exploitdb` / `nuclei` / `kev`) の再生成もここ。
 - **storage.py** — `Storage` Protocol と `LocalStorage` / `S3Storage` の 2 実装。`put/get` は転送、`url()` がカタログに焼き込まれる絶対参照を返す。
 - **config.py** — 環境変数から `Config` を構築。`VLAKE_LOCAL_DIR` でローカルモード。
 
@@ -59,6 +59,7 @@ Parquet データファイルを先にアップロードし、カタログ (`vla
 - **update**: 日次デルタ (`<ds>/updates/year=YYYY/<ds>-updates-YYYY-MM-DD.parquet`)。カタログ内の最大更新日時 (`max_*` メソッド) を超えたレコードだけを追記
 - EPSS のみ例外で、履歴そのものがデータ (日次スコア)。閉じた年は年単位 1 ファイルに統合、当年のみ日次ファイル
 - nuclei も例外で backfill が無い。YAML に更新日時が無いため内容ハッシュ (digest 列) で差分検出し、初回 update が全量投入。削除は removed=true のトゥームストーン行
+- kev も backfill が無い (過去断面の公式アーカイブが無い)。レコード更新日時が無いためカタログ latest との全フィールド比較で差分検出。削除・復活の扱いは nuclei と同じ
 
 ### 新データセットを追加するときに触るファイル
 
