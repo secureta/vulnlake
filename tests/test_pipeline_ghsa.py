@@ -75,7 +75,7 @@ def test_backfill_ghsa_from_local_tarball(cfg, tmp_path):
     assert [r[0] for r in rows] == ["GHSA-aaaa-bbbb-cccc", "GHSA-jfh8-c2jp-5v3q"]
     # datasets view に ghsa のライセンスが載る
     names = {r[0] for r in con.execute("SELECT name FROM frozen.datasets").fetchall()}
-    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei"}
+    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei", "cwe"}
 
     # 冪等: 再実行は全年 skip
     msg = pipeline.backfill_ghsa(cfg, source_tar=tp)

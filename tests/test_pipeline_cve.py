@@ -56,7 +56,7 @@ def test_backfill_cve_from_local_zip(cfg, tmp_path):
     assert [r[0] for r in rows] == ["CVE-2021-0001", "CVE-2021-44228"]
     # datasets view に cve のライセンスが載る
     names = {r[0] for r in con.execute("SELECT name FROM frozen.datasets").fetchall()}
-    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei"}
+    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei", "cwe"}
 
     # 冪等: 再実行は全年 skip
     msg = pipeline.backfill_cve(cfg, source_zip=zp)

@@ -279,3 +279,33 @@ def test_backfill_nuclei_not_available(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["backfill", "nuclei"])
     assert result.exit_code != 0
     assert "nuclei" in result.output  # Choice 外の invalid choice エラー
+
+
+def test_update_cwe_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline, "update_cwe", lambda cfg: "published 4.20 (1450 records)"
+    )
+    result = CliRunner().invoke(main, ["update", "cwe"])
+    assert result.exit_code == 0, result.output
+    assert "published 4.20" in result.output
+
+
+def test_update_cwe_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "cwe", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_cwe_not_available(monkeypatch, tmp_path):
+    # cwe に backfill は無い (初回 update が全量投入)
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "cwe"])
+    assert result.exit_code != 0
+    assert "cwe" in result.output  # Choice 外の invalid choice エラー
