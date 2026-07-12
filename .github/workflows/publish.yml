@@ -12,74 +12,50 @@ jobs:
   update:
     runs-on: ubuntu-latest
     environment: publish  # Secrets/Variables はこの Environment に置く (ブランチ保護付き)
+    env:
+      VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+      VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+      VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - run: uv sync
-      - run: uv run vlake update epss
+      # 各データセットは continue-on-error で独立させ、1つの失敗が他の更新と
+      # verify を止めないようにする。失敗は末尾の集計ステップでジョブ失敗に変換する
+      - id: epss
+        continue-on-error: true
+        run: uv run vlake update epss
+      - id: cve
+        continue-on-error: true
+        run: uv run vlake update cve
         env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-      - run: uv run vlake update cve
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
           GITHUB_TOKEN: ${{ github.token }}  # Releases API のレート制限回避
-      - run: uv run vlake update ghsa
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-      - run: uv run vlake update exploitdb
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-      - run: uv run vlake update nuclei
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-      - run: uv run vlake update cwe
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-      - run: uv run vlake update kev
-        env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+      - id: ghsa
+        continue-on-error: true
+        run: uv run vlake update ghsa
+      - id: exploitdb
+        continue-on-error: true
+        run: uv run vlake update exploitdb
+      - id: nuclei
+        continue-on-error: true
+        run: uv run vlake update nuclei
+      - id: cwe
+        continue-on-error: true
+        run: uv run vlake update cwe
+      - id: kev
+        continue-on-error: true
+        run: uv run vlake update kev
       - run: uv run vlake verify --max-age-days 3
+      - name: check update failures
+        if: contains(steps.*.outcome, 'failure')
         env:
-          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
-          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
-          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          echo "failed datasets:"
+          echo "$STEPS" | jq -r 'to_entries[] | select(.value.outcome == "failure") | "  - " + .key'
+          exit 1
