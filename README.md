@@ -2,8 +2,9 @@
 
 Security datasets published as a **frozen DuckLake** on S3-compatible storage.
 Currently included: **EPSS** (full daily history since 2021-04-14), **CVE**
-(CVE List V5, full record history of changes), and **GHSA** (GitHub Advisory
-Database, github-reviewed advisories with package/version ranges).
+(CVE List V5, full record history of changes), **GHSA** (GitHub Advisory
+Database, github-reviewed advisories with package/version ranges), and
+**ExploitDB** (Exploit Database index, exploit metadata linked to code by URL).
 
 ## Query it
 
@@ -18,6 +19,8 @@ SELECT * FROM vlake.cve_history WHERE cve = 'CVE-2021-44228' ORDER BY date_updat
 SELECT ghsa, summary, severity FROM vlake.ghsa WHERE cve = 'CVE-2021-44228';
 SELECT ghsa, a.package, a.introduced, a.fixed
 FROM vlake.ghsa, UNNEST(affected) AS t(a) WHERE a.ecosystem = 'npm';
+SELECT edb_id, description, type, platform, code_url
+FROM vlake.exploitdb WHERE list_contains(cve, 'CVE-2021-44228');
 SELECT * FROM vlake.datasets;  -- data sources & licenses
 ```
 
@@ -74,6 +77,18 @@ published year, sorted by ghsa) plus
 `ghsa/updates/year=YYYY/ghsa-updates-YYYY-MM-DD.parquet` (daily deltas of
 records whose `modified` advanced past the catalog's max; dated by run date).
 
+`exploitdb_history(edb_id INTEGER, cve VARCHAR[], description, type, platform,
+author, port INTEGER, verified BOOLEAN, tags, aliases, codes, file, code_url,
+source_url, application_url, screenshot_url, date_published DATE, date_added DATE,
+date_updated DATE)` — append-only index history from the Exploit Database
+`files_exploits.csv`. The `exploitdb` view returns the latest row per `edb_id`
+(by `date_updated`). Exploit code is not redistributed; `code_url` links to it.
+
+Layout: `exploitdb/year=YYYY/exploitdb-YYYY.parquet` (backfill snapshot,
+partitioned by `date_published` year, sorted by `edb_id`) plus
+`exploitdb/updates/year=YYYY/exploitdb-updates-YYYY-MM-DD.parquet` (daily deltas
+of rows whose `date_updated` advanced; dated by run date).
+
 ## Build your own lake
 
 ```bash
@@ -89,17 +104,19 @@ git clone --depth 1 https://github.com/empiricalsec/epss_scores /tmp/epss_scores
 uv run vlake backfill epss --source /tmp/epss_scores
 uv run vlake backfill cve   # baseline zip (~550MB) を自動ダウンロード
 uv run vlake backfill ghsa  # リポジトリ tarball を自動ダウンロード
+uv run vlake backfill exploitdb  # files_exploits.csv を自動ダウンロード
 
 # daily
 uv run vlake update epss
 uv run vlake update cve
 uv run vlake update ghsa
+uv run vlake update exploitdb
 uv run vlake verify
 ```
 
 No local machine needed for the backfill: after configuring the `publish`
 Environment (below), open the **Actions** tab → **backfill** → **Run
-workflow** and pick a **dataset** (`all` / `epss` / `cve` / `ghsa`). For epss the job
+workflow** and pick a **dataset** (`all` / `epss` / `cve` / `ghsa` / `exploitdb`). For epss the job
 clones the mirror on the runner, consolidates closed years into per-year
 Parquet files, and ingests the current year day by day; for cve it downloads
 the latest cvelistV5 baseline zip (~550MB) and ingests it (roughly an hour
@@ -157,6 +174,15 @@ GHSA data is the GitHub Advisory Database — © GitHub, Inc.
 https://creativecommons.org/licenses/by/4.0/. This project redistributes it
 with modifications (OSV JSON converted to Parquet); the original record is
 kept in the `raw` column. Not endorsed or certified by GitHub, Inc.
+See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+
+ExploitDB data is the Exploit Database index
+(https://gitlab.com/exploit-database/exploitdb), maintained by OffSec, licensed
+under GPL-2.0-or-later (`licenses/GPL-2.0.txt`). This project redistributes only
+the derived index Parquet under GPL-2.0-or-later, with modifications (CSV
+converted to Parquet, exploit code not included — linked via `code_url`). The
+copyleft applies to that Parquet only; vulnlake's Apache-2.0 code and the other
+datasets are unaffected (mere aggregation). Not endorsed or certified by OffSec.
 See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
 
 ## Code license
