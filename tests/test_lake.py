@@ -178,8 +178,15 @@ def _make_exploitdb_parquet(
     from tests.conftest import make_exploitdb_csv
 
     raw = make_exploitdb_csv(
-        [{"id": edb_id, "date_updated": updated, "date_published": "2010-01-01",
-          "description": desc, "codes": "CVE-2010-0001"}]
+        [
+            {
+                "id": edb_id,
+                "date_updated": updated,
+                "date_published": "2010-01-01",
+                "description": desc,
+                "codes": "CVE-2010-0001",
+            }
+        ]
     )
     rows = [r for r in (exploitdb.parse_row(r) for r in exploitdb.iter_rows(raw)) if r]
     out = tmp_path / name
@@ -207,7 +214,9 @@ def test_exploitdb_history_and_latest_view(tmp_path):
     con = duckdb.connect()
     con.execute("INSTALL ducklake; LOAD ducklake;")
     con.execute(f"ATTACH 'ducklake:{catalog}' AS frozen (READ_ONLY)")
-    assert con.execute("SELECT count(*) FROM frozen.exploitdb_history").fetchone()[0] == 2
+    assert (
+        con.execute("SELECT count(*) FROM frozen.exploitdb_history").fetchone()[0] == 2
+    )
     rows = con.execute("SELECT edb_id, description FROM frozen.exploitdb").fetchall()
     assert rows == [(42, "new")]
     # cve は配列列: list_contains で引ける

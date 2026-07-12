@@ -197,9 +197,23 @@ def make_ghsa_tarball(
 
 
 _EXPLOITDB_COLUMNS = [
-    "id", "file", "description", "date_published", "author", "type", "platform",
-    "port", "date_added", "date_updated", "verified", "codes", "tags", "aliases",
-    "screenshot_url", "application_url", "source_url",
+    "id",
+    "file",
+    "description",
+    "date_published",
+    "author",
+    "type",
+    "platform",
+    "port",
+    "date_added",
+    "date_updated",
+    "verified",
+    "codes",
+    "tags",
+    "aliases",
+    "screenshot_url",
+    "application_url",
+    "source_url",
 ]
 
 
