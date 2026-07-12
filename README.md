@@ -3,8 +3,10 @@
 Security datasets published as a **frozen DuckLake** on S3-compatible storage.
 Currently included: **EPSS** (full daily history since 2021-04-14), **CVE**
 (CVE List V5, full record history of changes), **GHSA** (GitHub Advisory
-Database, github-reviewed advisories with package/version ranges), and
-**ExploitDB** (Exploit Database index, exploit metadata linked to code by URL).
+Database, github-reviewed advisories with package/version ranges),
+**ExploitDB** (Exploit Database index, exploit metadata linked to code by URL),
+and **nuclei** (nuclei-templates index, detection template metadata linked to
+templates by URL).
 
 ## Query it
 
@@ -21,6 +23,10 @@ SELECT ghsa, a.package, a.introduced, a.fixed
 FROM vlake.ghsa, UNNEST(affected) AS t(a) WHERE a.ecosystem = 'npm';
 SELECT edb_id, description, type, platform, code_url
 FROM vlake.exploitdb WHERE list_contains(cve, 'CVE-2021-44228');
+-- Is there a nuclei detection template for this CVE?
+SELECT template_id, name, severity, template_url
+FROM vlake.nuclei
+WHERE list_contains(cve, 'CVE-2024-3400') AND NOT removed;
 SELECT * FROM vlake.datasets;  -- data sources & licenses
 ```
 
@@ -89,6 +95,22 @@ partitioned by `date_published` year, sorted by `edb_id`) plus
 `exploitdb/updates/year=YYYY/exploitdb-updates-YYYY-MM-DD.parquet` (daily deltas
 of rows whose `date_updated` advanced; dated by run date).
 
+`nuclei_history(template_id, name, severity, description, author VARCHAR[],
+tags VARCHAR[], reference VARCHAR[], cve VARCHAR[], cwe VARCHAR[],
+cvss_score DOUBLE, cvss_metrics, epss_score DOUBLE, epss_percentile DOUBLE,
+cpe, vendor, product, verified BOOLEAN, type, file, template_url, digest,
+fetched_date DATE, removed BOOLEAN)` — append-only index of nuclei-templates
+info blocks. Templates carry no modification timestamp upstream, so changes
+are detected by `digest` (SHA-256 of the template with its signature line
+stripped). Rows that disappear upstream get a tombstone row with
+`removed = true` carrying the last known values. The `nuclei` view returns
+the latest row per `template_id`. `epss_score` / `epss_percentile` are
+snapshots embedded in the template at authoring time — the `epss` table is
+the source of truth for current scores.
+
+Layout: `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` (daily
+deltas; the first run is the full load — there is no backfill for nuclei).
+
 ## Build your own lake
 
 ```bash
@@ -111,6 +133,7 @@ uv run vlake update epss
 uv run vlake update cve
 uv run vlake update ghsa
 uv run vlake update exploitdb
+uv run vlake update nuclei  # no backfill: the first run does a full load
 uv run vlake verify
 ```
 
@@ -183,6 +206,12 @@ the derived index Parquet under GPL-2.0-or-later, with modifications (CSV
 converted to Parquet, exploit code not included — linked via `code_url`). The
 copyleft applies to that Parquet only; vulnlake's Apache-2.0 code and the other
 datasets are unaffected (mere aggregation). Not endorsed or certified by OffSec.
+See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+
+nuclei data is template metadata from
+[nuclei-templates](https://github.com/projectdiscovery/nuclei-templates),
+© ProjectDiscovery, Inc., licensed under the MIT License
+(`licenses/MIT-nuclei-templates.txt`). Template bodies are not redistributed.
 See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
 
 ## Code license
