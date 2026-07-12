@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss, exploitdb, ghsa
+from . import cvelist, epss, exploitdb, ghsa, nuclei
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -71,11 +71,13 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
             cvelist.LICENSE_INFO,
             ghsa.LICENSE_INFO,
             exploitdb.LICENSE_INFO,
+            nuclei.LICENSE_INFO,
         ]
     )
     lake.refresh_cve_view()
     lake.refresh_ghsa_view()
     lake.refresh_exploitdb_view()
+    lake.refresh_nuclei_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -502,6 +504,73 @@ def backfill_exploitdb(cfg: Config, source_csv: Path | None = None) -> str:
         finally:
             lake.close()
     return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
+def update_nuclei(cfg: Config, today: date | None = None) -> str:
+    """最新 tarball 断面とカタログ latest の内容ハッシュ差分だけを追記する。
+
+    テンプレート YAML に更新日時が無いため、署名行を除いた内容の SHA-256 (digest)
+    とパスの変化で差分を検出する。カタログが空なら全件が新規となるため
+    backfill は存在しない (初回 update が全量投入)。上流から消えたテンプレートは
+    最終値を引き継いだ removed=true のトゥームストーン行を追記する。
+    tarball に日付ラベルは無いため日次キーには実行日 (UTC) を使う。
+    today はテスト用の注入点 (省略時は実日付)。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = nuclei.key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            tar_path = workdir / "nuclei-templates.tar.gz"
+            nuclei.download(nuclei.TARBALL_URL, tar_path)
+            parsed, bad = [], 0
+            for relpath, raw in nuclei.iter_templates(tar_path):
+                row = nuclei.parse_template(relpath, raw)
+                if row is None:
+                    bad += 1
+                else:
+                    parsed.append(row)
+            # 同一 id はパス辞書順で最初の1件を採用 (上流は id 一意を強制、保険)
+            parsed.sort(key=lambda r: r["file"])
+            current: dict[str, dict] = {}
+            for row in parsed:
+                current.setdefault(row["template_id"], row)
+            latest = {r["template_id"]: r for r in lake.nuclei_latest_rows()}
+            active = sum(1 for r in latest.values() if not r["removed"])
+            if latest and len(current) * 2 < active:
+                # 断面の異常縮小は大量トゥームストーンを誤生成するため中断する
+                raise RuntimeError(
+                    f"refusing to ingest: snapshot has {len(current)} templates, "
+                    f"less than half of {active} active in catalog"
+                )
+            rows = []
+            for tid, row in current.items():
+                prev = latest.get(tid)
+                if (
+                    prev is None
+                    or prev["digest"] != row["digest"]
+                    or prev["file"] != row["file"]
+                    or prev["removed"]
+                ):
+                    rows.append({**row, "fetched_date": run_date, "removed": False})
+            for tid, prev in latest.items():
+                if tid not in current and not prev["removed"]:
+                    rows.append({**prev, "fetched_date": run_date, "removed": True})
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            nuclei.write_parquet(nuclei.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"nuclei updates {run_date} ({len(rows)} records)")
+            lake.add_file("nuclei_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records, {bad} bad)"
 
 
 def rebuild_catalog(cfg: Config) -> str:
