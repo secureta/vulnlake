@@ -40,8 +40,8 @@ S3 モードは `VLAKE_S3_BUCKET` + `VLAKE_PUBLIC_URL`(+ `VLAKE_S3_ENDPOINT`, AW
 
 - **cli.py** — click のサブコマンド (`update` / `backfill` / `verify` / `rebuild-catalog`)。薄いラッパで、実体は pipeline へ委譲。
 - **pipeline.py** — オーケストレーション層。「取得 → Parquet 化 → アップロード → カタログ登録 → カタログ公開」の手順をデータセットごとに `update_*` / `backfill_*` として実装。`verify` はストレージとカタログの整合性を検査する。
-- **データセットモジュール** (epss.py / cvelist.py / ghsa.py / exploitdb.py) — 各ソースの fetch / parse / PyArrow Table 化 / Parquet 書き出しと、ストレージキー命名 (`key_for` 等)。pipeline から呼ばれる純粋な変換ロジック。
-- **lake.py** — DuckLake カタログ (`vlake.ducklake`) への書き込みセッション。カタログはローカルファイルとして操作し、データファイルは `ducklake_add_data_files()` で絶対 URL を登録する。テーブル定義・latest ビュー (`cve` / `ghsa` / `exploitdb`) の再生成もここ。
+- **データセットモジュール** (epss.py / cvelist.py / ghsa.py / exploitdb.py / nuclei.py) — 各ソースの fetch / parse / PyArrow Table 化 / Parquet 書き出しと、ストレージキー命名 (`key_for` 等)。pipeline から呼ばれる純粋な変換ロジック。
+- **lake.py** — DuckLake カタログ (`vlake.ducklake`) への書き込みセッション。カタログはローカルファイルとして操作し、データファイルは `ducklake_add_data_files()` で絶対 URL を登録する。テーブル定義・latest ビュー (`cve` / `ghsa` / `exploitdb` / `nuclei`) の再生成もここ。
 - **storage.py** — `Storage` Protocol と `LocalStorage` / `S3Storage` の 2 実装。`put/get` は転送、`url()` がカタログに焼き込まれる絶対参照を返す。
 - **config.py** — 環境変数から `Config` を構築。`VLAKE_LOCAL_DIR` でローカルモード。
 
