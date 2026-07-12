@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss, ghsa
+from . import cvelist, epss, exploitdb, ghsa
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -66,10 +66,16 @@ def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
 
 def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_datasets_view(
-        [epss.LICENSE_INFO, cvelist.LICENSE_INFO, ghsa.LICENSE_INFO]
+        [
+            epss.LICENSE_INFO,
+            cvelist.LICENSE_INFO,
+            ghsa.LICENSE_INFO,
+            exploitdb.LICENSE_INFO,
+        ]
     )
     lake.refresh_cve_view()
     lake.refresh_ghsa_view()
+    lake.refresh_exploitdb_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -396,10 +402,66 @@ def backfill_ghsa(cfg: Config, source_tar: Path | None = None) -> str:
     return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
 
 
+def backfill_exploitdb(cfg: Config, source_csv: Path | None = None) -> str:
+    """files_exploits.csv (省略時は最新をダウンロード) から全索引を取り込む。
+
+    date_published 年ごとに1ファイル (edb_id ソート)。登録済みの年は skip (冪等)。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        if source_csv is None:
+            source_csv = workdir / "files_exploits.csv"
+            print("  files_exploits.csv をダウンロード中...")
+            exploitdb.download(exploitdb.CSV_URL, source_csv)
+        raw = source_csv.read_bytes()
+        parsed, bad, min_year = [], 0, None
+        for rawrow in exploitdb.iter_rows(raw):
+            row = exploitdb.parse_row(rawrow)
+            if row is None:
+                bad += 1
+                continue
+            parsed.append(row)
+            y = exploitdb.year_of(row)
+            if y is not None and (min_year is None or y < min_year):
+                min_year = y
+        by_year: dict[int, list[dict]] = {}
+        for row in parsed:
+            year = exploitdb.year_of(row) or min_year or 1970
+            by_year.setdefault(year, []).append(row)
+        lake, catalog = _open_lake(storage, workdir)
+        added = skipped = 0
+        try:
+            registered = lake.registered_paths()
+            for year in sorted(by_year):
+                key = exploitdb.key_for_year(year)
+                if storage.url(key) in registered:
+                    skipped += 1
+                    continue
+                rows = by_year[year]
+                parquet = workdir / f"exploitdb-{year}.parquet"
+                exploitdb.write_parquet(exploitdb.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"exploitdb {year} backfill ({len(rows)} records)")
+                lake.add_file("exploitdb_history", storage.url(key))
+                parquet.unlink()
+                added += 1
+                print(f"  {year}: {len(rows)} 件")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
-    tables = {"epss/": "epss", "cve/": "cve_history", "ghsa/": "ghsa_history"}
+    tables = {
+        "epss/": "epss",
+        "cve/": "cve_history",
+        "ghsa/": "ghsa_history",
+        "exploitdb/": "exploitdb_history",
+    }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
         (k, table)
