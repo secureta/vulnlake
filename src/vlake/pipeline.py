@@ -540,6 +540,9 @@ def rebuild_catalog(cfg: Config) -> str:
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_EXPLOITDB_UPDATE_KEY_DATE = re.compile(
+    r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
+)
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -572,6 +575,11 @@ def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict
         "ok": ok,
         "stale": stale,
     }
+
+
+def _as_date(value):
+    """TIMESTAMP は .date() を取り、DATE (datetime.date) はそのまま返す。"""
+    return value.date() if isinstance(value, datetime) else value
 
 
 def _verify_history(
@@ -617,19 +625,19 @@ def _verify_history(
         ok = (
             ok
             and max_ts is not None
-            and max_ts.date() >= max(update_dates) - timedelta(days=1)
+            and _as_date(max_ts) >= max(update_dates) - timedelta(days=1)
         )
     stale = (
         max_age_days is not None
         and max_ts is not None
-        and (date.today() - max_ts.date()).days > max_age_days
+        and (date.today() - _as_date(max_ts)).days > max_age_days
     )
     return {
         "files_in_storage": len(keys),
         "files_in_catalog": len(catalog_paths),
         "row_count": row_count,
-        "min_date": min_ts.date() if min_ts else None,
-        "max_date": max_ts.date() if max_ts else None,
+        "min_date": _as_date(min_ts) if min_ts else None,
+        "max_date": _as_date(max_ts) if max_ts else None,
         "ok": ok,
         "stale": stale,
     }
@@ -679,6 +687,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="ghsa_history",
                     ts_column="modified",
                     update_key_re=_GHSA_UPDATE_KEY_DATE,
+                ),
+                "exploitdb": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="exploitdb/",
+                    table="exploitdb_history",
+                    ts_column="date_updated",
+                    update_key_re=_EXPLOITDB_UPDATE_KEY_DATE,
                 ),
             }
         finally:
