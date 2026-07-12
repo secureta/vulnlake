@@ -82,6 +82,7 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_nuclei_view()
     lake.refresh_cwe_view()
     lake.refresh_kev_view()
+    lake.refresh_cve_sources_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
