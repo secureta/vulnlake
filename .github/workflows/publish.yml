@@ -59,6 +59,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+      - run: uv run vlake update cwe
+        env:
+          VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
+          VLAKE_S3_BUCKET: ${{ secrets.VLAKE_S3_BUCKET }}
+          VLAKE_PUBLIC_URL: ${{ vars.VLAKE_PUBLIC_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
       - run: uv run vlake update kev
         env:
           VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
