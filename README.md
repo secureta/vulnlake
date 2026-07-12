@@ -339,44 +339,18 @@ Notes:
 
 ## Data licenses
 
-EPSS scores provided by FIRST.org — https://www.first.org/epss.
-This project redistributes EPSS data but is not endorsed or certified by FIRST.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and the in-lake `datasets` view.
+| Dataset | Source | License | Notes |
+| --- | --- | --- | --- |
+| EPSS | [FIRST.org EPSS](https://www.first.org/epss) | FIRST EPSS Usage Agreement (`LicenseRef-scancode-first-epss-usage`) | Redistributed with attribution. Not endorsed or certified by FIRST. |
+| CVE | [CVE List V5](https://github.com/CVEProject/cvelistV5) | [CVE Terms of Use](https://www.cve.org/Legal/TermsOfUse) (SPDX: `cve-tou`) | CVE® is a registered trademark of The MITRE Corporation. CVE Records: Copyright © 1999-2026 The MITRE Corporation. Not endorsed or certified by MITRE or the CVE Program. |
+| GHSA | [GitHub Advisory Database](https://github.com/github/advisory-database) — © GitHub, Inc. | [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Redistributed with modifications (OSV JSON → Parquet); original record kept in the `raw` column. Not endorsed or certified by GitHub, Inc. |
+| ExploitDB | [Exploit Database index](https://gitlab.com/exploit-database/exploitdb) — maintained by OffSec | GPL-2.0-or-later (`licenses/GPL-2.0.txt`) | Only the derived index Parquet redistributed under GPL-2.0-or-later, with modifications (CSV → Parquet, exploit code not included — linked via `code_url`). Copyleft applies to that Parquet only; vulnlake's Apache-2.0 code and other datasets are unaffected (mere aggregation). Not endorsed or certified by OffSec. |
+| nuclei | [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates) — © ProjectDiscovery, Inc. | MIT (`licenses/MIT-nuclei-templates.txt`) | Template metadata only; template bodies not redistributed (linked via `template_url`). Not endorsed or certified by ProjectDiscovery, Inc. |
+| CWE | [Common Weakness Enumeration](https://cwe.mitre.org/) — © The MITRE Corporation | [CWE Terms of Use](https://cwe.mitre.org/about/termsofuse.html) | Redistributed with modifications (cwec XML → Parquet). Not endorsed or certified by The MITRE Corporation. |
+| KEV | [CISA Known Exploited Vulnerabilities Catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) | CC0 1.0 Universal (`licenses/CC0-1.0-kev.txt`) | Redistributed with modifications (JSON → Parquet). Not endorsed by CISA or DHS; the CISA Logo and DHS Seal are not used. Third-party links in the data are bound by the policies and licenses of those third-party websites. |
 
-CVE data is redistributed under the CVE Terms of Use (SPDX: `cve-tou`) —
-https://www.cve.org/Legal/TermsOfUse. CVE® is a registered trademark of The
-MITRE Corporation. CVE Records: Copyright © 1999-2026 The MITRE Corporation.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
-
-GHSA data is the GitHub Advisory Database — © GitHub, Inc.
-(https://github.com/github/advisory-database), licensed under CC-BY 4.0 —
-https://creativecommons.org/licenses/by/4.0/. This project redistributes it
-with modifications (OSV JSON converted to Parquet); the original record is
-kept in the `raw` column. Not endorsed or certified by GitHub, Inc.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
-
-ExploitDB data is the Exploit Database index
-(https://gitlab.com/exploit-database/exploitdb), maintained by OffSec, licensed
-under GPL-2.0-or-later (`licenses/GPL-2.0.txt`). This project redistributes only
-the derived index Parquet under GPL-2.0-or-later, with modifications (CSV
-converted to Parquet, exploit code not included — linked via `code_url`). The
-copyleft applies to that Parquet only; vulnlake's Apache-2.0 code and the other
-datasets are unaffected (mere aggregation). Not endorsed or certified by OffSec.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
-
-nuclei data is template metadata from
-[nuclei-templates](https://github.com/projectdiscovery/nuclei-templates),
-© ProjectDiscovery, Inc., licensed under the MIT License
-(`licenses/MIT-nuclei-templates.txt`). Template bodies are not redistributed.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
-
-KEV data is the CISA Known Exploited Vulnerabilities Catalog
-(https://www.cisa.gov/known-exploited-vulnerabilities-catalog), distributed
-under CC0 1.0 Universal (`licenses/CC0-1.0-kev.txt`). This project
-redistributes it with modifications (JSON converted to Parquet). Not endorsed
-by CISA or DHS; the CISA Logo and DHS Seal are not used. Third-party links in
-the data are bound by the policies and licenses of those third-party websites.
-See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+For full terms and attributions, see [DATA_LICENSES.md](DATA_LICENSES.md) and
+the in-lake `datasets` view (`SELECT * FROM vlake.datasets`).
 
 ## Code license
 
