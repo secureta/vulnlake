@@ -38,8 +38,7 @@ def test_update_publish_and_idempotency(cfg, monkeypatch):
     assert con.execute("SELECT count(*) FROM frozen.epss").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM frozen.datasets").fetchone()[0] == 7
     row = con.execute(
-        "SELECT has_epss, epss_days FROM frozen.cve_sources "
-        "WHERE cve = 'CVE-1999-0001'"
+        "SELECT has_epss, epss_days FROM frozen.cve_sources WHERE cve = 'CVE-1999-0001'"
     ).fetchone()
     assert row == (True, 1)
 
