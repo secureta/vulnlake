@@ -82,6 +82,29 @@ class Lake:
                 raw VARCHAR
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.exploitdb_history (
+                edb_id INTEGER,
+                cve VARCHAR[],
+                description VARCHAR,
+                type VARCHAR,
+                platform VARCHAR,
+                author VARCHAR,
+                port INTEGER,
+                verified BOOLEAN,
+                tags VARCHAR,
+                aliases VARCHAR,
+                codes VARCHAR,
+                file VARCHAR,
+                code_url VARCHAR,
+                source_url VARCHAR,
+                application_url VARCHAR,
+                screenshot_url VARCHAR,
+                date_published DATE,
+                date_added DATE,
+                date_updated DATE
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -129,6 +152,35 @@ class Lake:
             f"CREATE OR REPLACE VIEW {self.ALIAS}.ghsa AS "  # noqa: S608
             f"SELECT * FROM {self.ALIAS}.ghsa_history "
             f"QUALIFY row_number() OVER (PARTITION BY ghsa ORDER BY modified DESC) = 1"
+        )
+
+    def max_exploitdb_date_updated(self):
+        """exploitdb_history の最新 date_updated (空なら None)。日次差分の判定に使う。"""
+        return self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT max(date_updated) FROM {self.ALIAS}.exploitdb_history"  # noqa: S608
+        ).fetchone()[0]
+
+    def exploitdb_edb_ids_at(self, d) -> set[int]:
+        """指定 date_updated に既に登録済みの edb_id 集合。
+
+        date_updated は日単位のため、同一最大日に後から現れた行を差分に含めるか
+        判定するのに使う (既登録は除外、二重計上を防ぐ)。
+        """
+        rows = self.con.execute(
+            # ALIAS はクラス定数、d はパラメータ化済みで注入されない
+            f"SELECT edb_id FROM {self.ALIAS}.exploitdb_history WHERE date_updated = ?",  # noqa: S608
+            [d],
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def refresh_exploitdb_view(self) -> None:
+        """edb_id ごとに date_updated 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.exploitdb AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.exploitdb_history "
+            f"QUALIFY row_number() OVER (PARTITION BY edb_id ORDER BY date_updated DESC) = 1"
         )
 
     def add_file(self, table: str, path: str) -> bool:

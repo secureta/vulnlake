@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 
 from tests.conftest import make_cve_record, make_epss_csv_gz, make_ghsa_record
-from vlake import cvelist, epss, ghsa
+from vlake import cvelist, epss, exploitdb, ghsa
 from vlake.lake import Lake
 
 
@@ -170,3 +170,48 @@ def test_ghsa_history_and_latest_view(tmp_path):
         "SELECT a.package FROM frozen.ghsa, UNNEST(affected) AS t(a) LIMIT 1"
     ).fetchone()[0]
     assert pkg == "org.apache.logging.log4j:log4j-core"
+
+
+def _make_exploitdb_parquet(
+    tmp_path: Path, edb_id: str, updated: str, name: str, desc: str = "x"
+) -> Path:
+    from tests.conftest import make_exploitdb_csv
+
+    raw = make_exploitdb_csv(
+        [{"id": edb_id, "date_updated": updated, "date_published": "2010-01-01",
+          "description": desc, "codes": "CVE-2010-0001"}]
+    )
+    rows = [r for r in (exploitdb.parse_row(r) for r in exploitdb.iter_rows(raw)) if r]
+    out = tmp_path / name
+    exploitdb.write_parquet(exploitdb.rows_to_table(rows), out)
+    return out
+
+
+def test_exploitdb_history_and_latest_view(tmp_path):
+    catalog = tmp_path / "vlake.ducklake"
+    old = _make_exploitdb_parquet(tmp_path, "42", "2025-01-01", "e1.parquet", "old")
+    new = _make_exploitdb_parquet(tmp_path, "42", "2026-01-01", "e2.parquet", "new")
+
+    lake = Lake(catalog, data_path=str(tmp_path / "unused"))
+    lake.ensure_tables()
+    assert lake.max_exploitdb_date_updated() is None
+    lake.add_file("exploitdb_history", str(old))
+    lake.add_file("exploitdb_history", str(new))
+    assert lake.max_exploitdb_date_updated() == date(2026, 1, 1)
+    assert lake.exploitdb_edb_ids_at(date(2026, 1, 1)) == {42}
+    assert lake.exploitdb_edb_ids_at(date(2025, 1, 1)) == {42}
+    lake.refresh_exploitdb_view()
+    lake.refresh_exploitdb_view()  # 再実行しても壊れない
+    lake.close()
+
+    con = duckdb.connect()
+    con.execute("INSTALL ducklake; LOAD ducklake;")
+    con.execute(f"ATTACH 'ducklake:{catalog}' AS frozen (READ_ONLY)")
+    assert con.execute("SELECT count(*) FROM frozen.exploitdb_history").fetchone()[0] == 2
+    rows = con.execute("SELECT edb_id, description FROM frozen.exploitdb").fetchall()
+    assert rows == [(42, "new")]
+    # cve は配列列: list_contains で引ける
+    hit = con.execute(
+        "SELECT edb_id FROM frozen.exploitdb WHERE list_contains(cve, 'CVE-2010-0001')"
+    ).fetchone()[0]
+    assert hit == 42
