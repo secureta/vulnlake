@@ -1,3 +1,4 @@
+import csv
 import gzip
 import io
 import json
@@ -193,3 +194,23 @@ def make_ghsa_tarball(
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 tf.addfile(info, io.BytesIO(data))
+
+
+_EXPLOITDB_COLUMNS = [
+    "id", "file", "description", "date_published", "author", "type", "platform",
+    "port", "date_added", "date_updated", "verified", "codes", "tags", "aliases",
+    "screenshot_url", "application_url", "source_url",
+]
+
+
+def make_exploitdb_csv(records: list[dict]) -> bytes:
+    """files_exploits.csv を模した CSV バイト列を作る。
+
+    records: 列名→値の dict のリスト。未指定の列は空文字列になる。
+    """
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_EXPLOITDB_COLUMNS)
+    writer.writeheader()
+    for rec in records:
+        writer.writerow({c: rec.get(c, "") for c in _EXPLOITDB_COLUMNS})
+    return buf.getvalue().encode()
