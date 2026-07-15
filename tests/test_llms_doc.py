@@ -35,7 +35,7 @@ def test_docs_workflow_publishes_llms_txt_with_markdown_headers() -> None:
     text = PUBLISH_DOCS_WORKFLOW.read_text()
 
     assert "docs/llms.md" in text
-    assert "s3 cp docs/llms.md s3://$VLAKE_S3_BUCKET/llms.txt" in text
+    assert 's3 cp docs/llms.md "s3://$VLAKE_S3_BUCKET/llms.txt"' in text
     assert "--content-type 'text/markdown; charset=utf-8'" in text
     assert "--cache-control 'public, max-age=3600'" in text
     assert '--endpoint-url "$VLAKE_S3_ENDPOINT"' in text

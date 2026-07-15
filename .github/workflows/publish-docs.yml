@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - name: publish llms.txt
         run: |
-          aws s3 cp docs/llms.md s3://$VLAKE_S3_BUCKET/llms.txt \
+          aws s3 cp docs/llms.md "s3://$VLAKE_S3_BUCKET/llms.txt" \
             --endpoint-url "$VLAKE_S3_ENDPOINT" \
             --content-type 'text/markdown; charset=utf-8' \
             --cache-control 'public, max-age=3600'
