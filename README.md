@@ -54,6 +54,12 @@ import polars as pl
 pl.read_parquet("https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet")
 ```
 
+## For LLMs
+
+A compact DuckDB/DuckLake query guide for agents is available at:
+
+https://vlake.reta.work/llms.txt
+
 ## Schema
 
 Each dataset is stored as an **append-only history table** plus a **latest
