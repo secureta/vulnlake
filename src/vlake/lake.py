@@ -150,6 +150,19 @@ class Lake:
             )"""
         )
         self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.cloudflare_waf_history (
+                identifier VARCHAR,
+                identifier_type VARCHAR,
+                cve VARCHAR,
+                source_title VARCHAR,
+                source_url VARCHAR,
+                source_date DATE,
+                matched_text VARCHAR,
+                fetched_date DATE,
+                removed BOOLEAN
+            )"""
+        )
+        self.con.execute(
             f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.cwe_history (
                 cwe_id VARCHAR,
                 entry_type VARCHAR,
@@ -291,6 +304,27 @@ class Lake:
             f"(PARTITION BY cve ORDER BY fetched_date DESC) = 1"
         )
 
+    def cloudflare_waf_latest_rows(self) -> list[dict]:
+        """identifier + source_url ごと fetched_date 最新の1行を列名付き dict で返す。"""
+        cur = self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "  # noqa: S608
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+
+    def refresh_cloudflare_waf_view(self) -> None:
+        """identifier + source_url ごとに fetched_date 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.cloudflare_waf AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
+        )
+
     def refresh_cve_sources_view(self) -> None:
         """CVE ごとに関連データが存在する公開 view/table を要約する view。"""
         self.con.execute(
@@ -329,6 +363,12 @@ class Lake:
                 FROM {self.ALIAS}.kev
                 WHERE NOT removed
             ),
+            cloudflare_waf_src AS (
+                SELECT cve, count(*) AS cloudflare_waf_count
+                FROM {self.ALIAS}.cloudflare_waf
+                WHERE cve IS NOT NULL AND NOT removed
+                GROUP BY cve
+            ),
             all_cves AS (
                 SELECT cve FROM epss_src
                 UNION
@@ -341,6 +381,8 @@ class Lake:
                 SELECT cve FROM nuclei_src
                 UNION
                 SELECT cve FROM kev_src
+                UNION
+                SELECT cve FROM cloudflare_waf_src
             )
             SELECT
                 all_cves.cve,
@@ -350,17 +392,20 @@ class Lake:
                 exploitdb_src.cve IS NOT NULL AS has_exploitdb,
                 nuclei_src.cve IS NOT NULL AS has_nuclei,
                 kev_src.cve IS NOT NULL AS has_kev,
+                cloudflare_waf_src.cve IS NOT NULL AS has_cloudflare_waf,
                 COALESCE(epss_src.epss_days, 0) AS epss_days,
                 COALESCE(ghsa_src.ghsa_count, 0) AS ghsa_count,
                 COALESCE(exploitdb_src.exploitdb_count, 0) AS exploitdb_count,
-                COALESCE(nuclei_src.nuclei_count, 0) AS nuclei_count
+                COALESCE(nuclei_src.nuclei_count, 0) AS nuclei_count,
+                COALESCE(cloudflare_waf_src.cloudflare_waf_count, 0) AS cloudflare_waf_count
             FROM all_cves
             LEFT JOIN epss_src ON all_cves.cve = epss_src.cve
             LEFT JOIN cve_src ON all_cves.cve = cve_src.cve
             LEFT JOIN ghsa_src ON all_cves.cve = ghsa_src.cve
             LEFT JOIN exploitdb_src ON all_cves.cve = exploitdb_src.cve
             LEFT JOIN nuclei_src ON all_cves.cve = nuclei_src.cve
-            LEFT JOIN kev_src ON all_cves.cve = kev_src.cve"""  # noqa: S608
+            LEFT JOIN kev_src ON all_cves.cve = kev_src.cve
+            LEFT JOIN cloudflare_waf_src ON all_cves.cve = cloudflare_waf_src.cve"""  # noqa: S608
         )
 
     def refresh_cwe_view(self) -> None:

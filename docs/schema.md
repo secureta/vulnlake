@@ -1,9 +1,9 @@
 # vulnlake schema reference
 
 For day-to-day use, start with the latest views below. Use history tables only
-when you need change history. For tombstone-backed views (`nuclei`, `kev`), add
-`WHERE NOT removed` unless you intentionally want records that disappeared
-upstream.
+when you need change history. For tombstone-backed views (`nuclei`, `kev`,
+`cloudflare_waf`), add `WHERE NOT removed` unless you intentionally want
+records that disappeared upstream.
 
 | Query this | Backed by | One row per | Content |
 |---|---|---|---|
@@ -15,6 +15,7 @@ upstream.
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
 | `cwe` | `cwe_history` | `cwe_id` | CWE catalog snapshot (join target for `cwe` columns) |
 | `kev` | `kev_history` | CVE | CISA Known Exploited Vulnerabilities catalog |
+| `cloudflare_waf` | `cloudflare_waf_history` | vulnerability identifier × source URL | Vulnerability IDs mentioned in Cloudflare WAF ChangeLog entries |
 | `datasets` | *(view)* | dataset | Data sources, licenses & attributions |
 
 ## Column reference
@@ -54,9 +55,9 @@ returns the latest row per CVE.
 ### `cve_sources` — cross-dataset CVE presence
 
 Summary view for quickly checking which public datasets contain data for a CVE.
-It is derived from `epss`, `cve`, `ghsa`, `exploitdb`, `nuclei`, and `kev`.
-For tombstone-backed views (`nuclei`, `kev`), only rows with `removed = false`
-count as present.
+It is derived from `epss`, `cve`, `ghsa`, `exploitdb`, `nuclei`, `kev`, and
+`cloudflare_waf`. For tombstone-backed views (`nuclei`, `kev`,
+`cloudflare_waf`), only rows with `removed = false` count as present.
 
 | Column | Type | Description |
 |---|---|---|
@@ -67,10 +68,12 @@ count as present.
 | `has_exploitdb` | BOOLEAN | Whether the `exploitdb` latest view has at least one linked entry |
 | `has_nuclei` | BOOLEAN | Whether the `nuclei` latest view has at least one currently-live linked template |
 | `has_kev` | BOOLEAN | Whether the `kev` latest view has a currently-live row |
+| `has_cloudflare_waf` | BOOLEAN | Whether `cloudflare_waf` has at least one currently-live WAF ChangeLog mention for the CVE |
 | `epss_days` | BIGINT | Number of EPSS score days |
 | `ghsa_count` | BIGINT | Number of linked GHSA advisories |
 | `exploitdb_count` | BIGINT | Number of linked ExploitDB entries |
 | `nuclei_count` | BIGINT | Number of linked currently-live nuclei templates |
+| `cloudflare_waf_count` | BIGINT | Number of linked currently-live Cloudflare WAF ChangeLog mentions |
 
 ### `ghsa` / `ghsa_history` — GitHub Advisory Database
 
@@ -200,6 +203,25 @@ returns the latest row per `cve`; withdrawn records become **tombstones**
 | `fetched_date` | DATE | Fetch date (also the view's latest-row key) |
 | `removed` | BOOLEAN | Tombstone flag (`true` = withdrawn by CISA) |
 
+### `cloudflare_waf` / `cloudflare_waf_history` — Cloudflare WAF ChangeLog vulnerability mentions
+
+Append-only history of vulnerability identifiers extracted from Cloudflare WAF
+ChangeLog MDX. The `cloudflare_waf` view returns the latest row per
+`identifier + source_url`; mentions that disappear upstream become
+**tombstones** (`removed = true`).
+
+| Column | Type | Description |
+|---|---|---|
+| `identifier` | VARCHAR | Vulnerability identifier extracted from the ChangeLog, such as CVE or GHSA |
+| `identifier_type` | VARCHAR | Identifier family (`CVE`, `GHSA`, `GO`, `PYSEC`, `RUSTSEC`) |
+| `cve` | VARCHAR | Same as `identifier` for CVE rows, otherwise NULL |
+| `source_title` | VARCHAR | ChangeLog entry title or historical table description |
+| `source_url` | VARCHAR | Public Cloudflare Docs URL for the source ChangeLog entry/page |
+| `source_date` | DATE | ChangeLog entry or historical table date, if available |
+| `matched_text` | VARCHAR | Short text excerpt containing the identifier |
+| `fetched_date` | DATE | Fetch date (also the view's latest-row key) |
+| `removed` | BOOLEAN | Tombstone flag (`true` = mention disappeared upstream) |
+
 ### `datasets` — data sources & licenses
 
 A view describing each dataset's provenance. See
@@ -228,3 +250,4 @@ you want to read the Parquet files directly or operate your own mirror.
 | `nuclei` | *(none)* | `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
 | `cwe` | *(none)* | `cwe/version=<ver>/cwe-<ver>.parquet` | One full snapshot per CWE release (a few per year); `cwe/last-modified.txt` stores the upstream `Last-Modified` for conditional GETs |
 | `kev` | *(none)* | `kev/updates/year=YYYY/kev-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
+| `cloudflare_waf` | *(none)* | `cloudflare_waf/updates/year=YYYY/cloudflare-waf-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full current ChangeLog identifier snapshot |

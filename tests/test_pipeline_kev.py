@@ -73,7 +73,16 @@ def test_update_kev_initial_full_load(cfg, monkeypatch):
     ).fetchone()
     assert hit == ("Apache", "Known", date(2021, 12, 10), ["CWE-917"])
     names = {r[0] for r in con.execute("SELECT name FROM frozen.datasets").fetchall()}
-    assert names == {"epss", "cve", "ghsa", "exploitdb", "nuclei", "cwe", "kev"}
+    assert names == {
+        "epss",
+        "cve",
+        "ghsa",
+        "exploitdb",
+        "nuclei",
+        "cwe",
+        "kev",
+        "cloudflare_waf",
+    }
 
     # 同日の再実行は skip、翌日は差分なし
     assert (

@@ -21,6 +21,7 @@ HISTORY_TO_SECTION = {
     "nuclei_history": "nuclei",
     "cwe_history": "cwe",
     "kev_history": "kev",
+    "cloudflare_waf_history": "cloudflare_waf",
 }
 DATASETS_COLUMNS = [
     ("name", "VARCHAR"),
@@ -38,10 +39,12 @@ CVE_SOURCES_COLUMNS = [
     ("has_exploitdb", "BOOLEAN"),
     ("has_nuclei", "BOOLEAN"),
     ("has_kev", "BOOLEAN"),
+    ("has_cloudflare_waf", "BOOLEAN"),
     ("epss_days", "BIGINT"),
     ("ghsa_count", "BIGINT"),
     ("exploitdb_count", "BIGINT"),
     ("nuclei_count", "BIGINT"),
+    ("cloudflare_waf_count", "BIGINT"),
 ]
 
 

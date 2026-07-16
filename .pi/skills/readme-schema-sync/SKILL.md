@@ -34,8 +34,8 @@ vlake のカタログ定義 (`src/vlake/lake.py`) と `docs/schema.md` は手動
 1. **概要表** (`| Query this | Backed by | One row per | Content |`)
    - 新テーブル/ビューの追加・削除、または grain (one row per) の変化で更新
 2. **各テーブルのカラム表** (`### <name> — ...` 見出し + `| Column | Type | Description |`)
-   - カラムの追加/削除/型変更/意味変更で更新。**このプロジェクトでは 8 個** (epss /
-     cve / ghsa / exploitdb / nuclei / cwe / kev / datasets)
+   - カラムの追加/削除/型変更/意味変更で更新。**このプロジェクトでは 9 個** (epss /
+     cve / ghsa / exploitdb / nuclei / cwe / kev / cloudflare_waf / datasets)
 3. **Storage layout 表** (`## Parquet storage layout` の `| Dataset | ... | Update files | Notes |`)
    - `key_for*` のパス命名やパーティション/ソート方針、backfill の有無を変えたら更新
 

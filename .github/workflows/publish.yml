@@ -50,6 +50,9 @@ jobs:
       - id: kev
         continue-on-error: true
         run: uv run vlake update kev
+      - id: cloudflare_waf
+        continue-on-error: true
+        run: uv run vlake update cloudflare_waf
       - run: uv run vlake verify --max-age-days 3
       - name: check update failures
         if: contains(steps.*.outcome, 'failure')

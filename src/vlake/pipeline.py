@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, cwe, epss, exploitdb, ghsa, kev, nuclei
+from . import cloudflare_waf, cvelist, cwe, epss, exploitdb, ghsa, kev, nuclei
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -74,6 +74,7 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
             nuclei.LICENSE_INFO,
             cwe.LICENSE_INFO,
             kev.LICENSE_INFO,
+            cloudflare_waf.LICENSE_INFO,
         ]
     )
     lake.refresh_cve_view()
@@ -82,6 +83,7 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_nuclei_view()
     lake.refresh_cwe_view()
     lake.refresh_kev_view()
+    lake.refresh_cloudflare_waf_view()
     lake.refresh_cve_sources_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
@@ -637,6 +639,76 @@ def update_kev(cfg: Config, today: date | None = None) -> str:
     return f"published {run_date} ({len(rows)} records, {bad} bad)"
 
 
+def update_cloudflare_waf(cfg: Config, today: date | None = None) -> str:
+    """Cloudflare WAF ChangeLog 断面とカタログ latest の差分だけを追記する。
+
+    ChangeLog の更新履歴ではなく、identifier + source_url ごとの現行断面を
+    latest と比較する。カタログが空なら初回 update が全量投入になる。
+    上流から消えた識別子言及は最終値を引き継いだ removed=true の
+    トゥームストーン行として追記する。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = cloudflare_waf.key_for_update(run_date)
+    compare_cols = (
+        "identifier_type",
+        "cve",
+        "source_title",
+        "source_date",
+        "matched_text",
+    )
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            source_dir = workdir / "cloudflare-waf-sources"
+            cloudflare_waf.download(source_dir)
+            parsed = cloudflare_waf.parse_dir(source_dir)
+            current: dict[tuple[str, str], dict] = {}
+            for row in parsed:
+                current.setdefault((row["identifier"], row["source_url"]), row)
+            if not current:
+                raise RuntimeError(
+                    "refusing to ingest: no vulnerability identifiers extracted "
+                    "from Cloudflare WAF changelog"
+                )
+            latest = {
+                (r["identifier"], r["source_url"]): r
+                for r in lake.cloudflare_waf_latest_rows()
+            }
+            active = sum(1 for r in latest.values() if not r["removed"])
+            if latest and len(current) * 2 < active:
+                raise RuntimeError(
+                    f"refusing to ingest: snapshot has {len(current)} records, "
+                    f"less than half of {active} active in catalog"
+                )
+            rows = []
+            for row_key, row in current.items():
+                prev = latest.get(row_key)
+                if (
+                    prev is None
+                    or prev["removed"]
+                    or any(prev[col] != row[col] for col in compare_cols)
+                ):
+                    rows.append({**row, "fetched_date": run_date, "removed": False})
+            for row_key, prev in latest.items():
+                if row_key not in current and not prev["removed"]:
+                    rows.append({**prev, "fetched_date": run_date, "removed": True})
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            cloudflare_waf.write_parquet(cloudflare_waf.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"cloudflare_waf updates {run_date} ({len(rows)} records)")
+            lake.add_file("cloudflare_waf_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records)"
+
+
 def update_cwe(cfg: Config) -> str:
     """cwec XML の新バージョン断面を全件スナップショットとして追記する。
 
@@ -692,6 +764,7 @@ def rebuild_catalog(cfg: Config) -> str:
         "nuclei/": "nuclei_history",
         "cwe/": "cwe_history",
         "kev/": "kev_history",
+        "cloudflare_waf/": "cloudflare_waf_history",
     }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
@@ -731,6 +804,9 @@ _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parqu
 # ではなく、より緩い窓で本当の長期停止だけを捕まえる。
 _EXPLOITDB_MAX_AGE_DAYS = 14
 _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_CLOUDFLARE_WAF_UPDATE_KEY_DATE = re.compile(
+    r"cloudflare-waf-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
+)
 # cwe のキーはバージョン断面 (cwe/version=<ver>/) で日付を含まないため常に不一致。
 # _verify_history の「max(ts) が日次キーに追随」検査は自然にスキップされる
 _CWE_UPDATE_KEY_DATE = re.compile(r"cwe-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
@@ -927,6 +1003,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="kev_history",
                     ts_column="fetched_date",
                     update_key_re=_KEV_UPDATE_KEY_DATE,
+                ),
+                "cloudflare_waf": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="cloudflare_waf/",
+                    table="cloudflare_waf_history",
+                    ts_column="fetched_date",
+                    update_key_re=_CLOUDFLARE_WAF_UPDATE_KEY_DATE,
                 ),
             }
         finally:

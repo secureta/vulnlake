@@ -6,7 +6,7 @@ vulnlake lets you ask questions such as:
 
 - What is the latest CVE record for this vulnerability?
 - How has its EPSS score changed over time?
-- Is it in GitHub Advisory Database, ExploitDB, nuclei-templates, CWE, or CISA KEV?
+- Is it in GitHub Advisory Database, ExploitDB, nuclei-templates, CWE, CISA KEV, or Cloudflare WAF?
 - Which source and license does each row come from?
 
 The public catalog is available over HTTPS. You do not need an account, API key,
@@ -67,10 +67,11 @@ The result looks like this:
 | nuclei-templates | Detection template metadata | `vlake.nuclei WHERE NOT removed` |
 | CWE | Common Weakness Enumeration catalog | `vlake.cwe` |
 | CISA KEV | Known Exploited Vulnerabilities catalog | `vlake.kev WHERE NOT removed` |
+| Cloudflare WAF ChangeLog | Vulnerability IDs mentioned in Cloudflare WAF managed-rules updates | `vlake.cloudflare_waf WHERE NOT removed` |
 
 Most datasets are modeled as:
 
-- a latest view (`cve`, `ghsa`, `exploitdb`, `nuclei`, `cwe`, `kev`) for normal queries
+- a latest view (`cve`, `ghsa`, `exploitdb`, `nuclei`, `cwe`, `kev`, `cloudflare_waf`) for normal queries
 - a history table (`*_history`) when you need previous versions or change history
 
 EPSS is already daily history, so it has no separate latest view.
@@ -90,7 +91,8 @@ SELECT
   s.has_ghsa,
   s.has_exploitdb,
   s.has_nuclei,
-  s.has_kev
+  s.has_kev,
+  s.has_cloudflare_waf
 FROM vlake.cve AS c
 LEFT JOIN vlake.cve_sources AS s USING (cve)
 LEFT JOIN (
@@ -137,6 +139,15 @@ WHERE cve = 'CVE-2021-44228'
   AND NOT removed;
 ```
 
+### Check whether Cloudflare WAF ChangeLog mentions a vulnerability
+
+```sql
+SELECT identifier, source_title, source_url, source_date
+FROM vlake.cloudflare_waf
+WHERE identifier = 'CVE-2025-53770'
+  AND NOT removed;
+```
+
 ### Join CVEs to CWE names
 
 ```sql
@@ -173,9 +184,9 @@ reading the full README.
 ## Schema
 
 For day-to-day use, start with the latest views below. Use history tables only
-when you need change history. For tombstone-backed views (`nuclei`, `kev`), add
-`WHERE NOT removed` unless you intentionally want records that disappeared
-upstream.
+when you need change history. For tombstone-backed views (`nuclei`, `kev`,
+`cloudflare_waf`), add `WHERE NOT removed` unless you intentionally want
+records that disappeared upstream.
 
 | Query this | Backed by | One row per | Content |
 |---|---|---|---|
@@ -187,6 +198,7 @@ upstream.
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
 | `cwe` | `cwe_history` | `cwe_id` | CWE catalog snapshot (join target for `cwe` columns) |
 | `kev` | `kev_history` | CVE | CISA Known Exploited Vulnerabilities catalog |
+| `cloudflare_waf` | `cloudflare_waf_history` | vulnerability identifier × source URL | Vulnerability IDs mentioned in Cloudflare WAF ChangeLog entries |
 | `datasets` | *(view)* | dataset | Data sources, licenses & attributions |
 
 For columns, history-table details, and direct Parquet paths, see the [full schema reference](docs/schema.md).
@@ -244,6 +256,7 @@ uv run vlake update exploitdb
 uv run vlake update nuclei  # first run is a full load
 uv run vlake update cwe     # snapshot per CWE release
 uv run vlake update kev     # first run is a full load
+uv run vlake update cloudflare_waf  # first run is a full load
 uv run vlake verify
 ```
 
@@ -296,6 +309,7 @@ disclaimers.
 | nuclei | [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates) | MIT; template metadata only, template bodies are not redistributed and are linked by `template_url` |
 | CWE | [Common Weakness Enumeration](https://cwe.mitre.org/) | CWE Terms of Use; redistributed with modifications; not endorsed or certified by The MITRE Corporation |
 | KEV | [CISA Known Exploited Vulnerabilities Catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) | CC0 1.0 Universal; redistributed with modifications; not endorsed by CISA or DHS |
+| cloudflare_waf | [Cloudflare WAF ChangeLog](https://developers.cloudflare.com/waf/change-log/) | CC-BY 4.0; vulnerability identifiers extracted from Cloudflare Docs MDX and converted to Parquet |
 
 ## Development
 
