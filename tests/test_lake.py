@@ -276,6 +276,49 @@ def test_kev_latest_rows_and_view(tmp_path):
         lake.close()
 
 
+def test_cloudflare_waf_latest_rows_and_view(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        assert lake.cloudflare_waf_latest_rows() == []
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cloudflare_waf_history "  # noqa: S608
+            "(identifier, identifier_type, cve, source_title, source_url, "
+            "source_date, matched_text, fetched_date, removed) VALUES "
+            "('CVE-2026-0001', 'CVE', 'CVE-2026-0001', 'old', "
+            " 'https://developers.cloudflare.com/changelog/a/', "
+            " DATE '2026-01-01', 'old text', DATE '2026-07-10', false), "
+            "('CVE-2026-0001', 'CVE', 'CVE-2026-0001', 'new', "
+            " 'https://developers.cloudflare.com/changelog/a/', "
+            " DATE '2026-01-01', 'new text', DATE '2026-07-12', false), "
+            "('GHSA-ABCD-1234-WXYZ', 'GHSA', NULL, 'removed', "
+            " 'https://developers.cloudflare.com/changelog/b/', "
+            " DATE '2026-01-02', 'ghsa text', DATE '2026-07-12', true)"
+        )
+        rows = {
+            (r["identifier"], r["source_url"]): r
+            for r in lake.cloudflare_waf_latest_rows()
+        }
+        assert rows[("CVE-2026-0001", "https://developers.cloudflare.com/changelog/a/")][
+            "source_title"
+        ] == "new"
+        assert rows[
+            ("GHSA-ABCD-1234-WXYZ", "https://developers.cloudflare.com/changelog/b/")
+        ]["removed"] is True
+
+        lake.refresh_cloudflare_waf_view()
+        got = lake.query(
+            "SELECT identifier, source_title, removed FROM lake.cloudflare_waf "
+            "ORDER BY identifier"
+        )
+        assert got == [
+            ("CVE-2026-0001", "new", False),
+            ("GHSA-ABCD-1234-WXYZ", "removed", True),
+        ]
+    finally:
+        lake.close()
+
+
 def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
     lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
     try:
@@ -318,18 +361,34 @@ def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
             "('CVE-2024-0001', DATE '2026-07-10', false), "
             "('CVE-2024-0005', DATE '2026-07-10', true)"
         )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cloudflare_waf_history "  # noqa: S608
+            "(identifier, identifier_type, cve, source_title, source_url, "
+            "source_date, matched_text, fetched_date, removed) VALUES "
+            "('CVE-2024-0001', 'CVE', 'CVE-2024-0001', 'waf-a', "
+            " 'https://developers.cloudflare.com/changelog/a/', "
+            " DATE '2026-01-01', 'CVE-2024-0001', DATE '2026-07-10', false), "
+            "('CVE-2024-0001', 'CVE', 'CVE-2024-0001', 'waf-b', "
+            " 'https://developers.cloudflare.com/changelog/b/', "
+            " DATE '2026-01-02', 'CVE-2024-0001', DATE '2026-07-10', false), "
+            "('CVE-2024-0006', 'CVE', 'CVE-2024-0006', 'removed', "
+            " 'https://developers.cloudflare.com/changelog/c/', "
+            " DATE '2026-01-03', 'CVE-2024-0006', DATE '2026-07-10', true)"
+        )
 
         lake.refresh_cve_view()
         lake.refresh_ghsa_view()
         lake.refresh_exploitdb_view()
         lake.refresh_nuclei_view()
         lake.refresh_kev_view()
+        lake.refresh_cloudflare_waf_view()
         lake.refresh_cve_sources_view()
         lake.refresh_cve_sources_view()  # 再実行しても壊れない
 
         got = lake.query(
             "SELECT cve, has_epss, has_cve, has_ghsa, has_exploitdb, "
-            "has_nuclei, has_kev, epss_days, ghsa_count, exploitdb_count, nuclei_count "
+            "has_nuclei, has_kev, has_cloudflare_waf, epss_days, ghsa_count, "
+            "exploitdb_count, nuclei_count, cloudflare_waf_count "
             "FROM lake.cve_sources ORDER BY cve"
         )
         assert got == [
@@ -341,10 +400,12 @@ def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
                 True,
                 True,
                 True,
+                True,
                 2,
                 2,
                 1,
                 1,
+                2,
             ),
             (
                 "CVE-2024-0002",
@@ -354,7 +415,9 @@ def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
                 False,
                 False,
                 False,
+                False,
                 1,
+                0,
                 0,
                 0,
                 0,
@@ -367,9 +430,11 @@ def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
                 True,
                 False,
                 False,
+                False,
                 0,
                 0,
                 2,
+                0,
                 0,
             ),
         ]
