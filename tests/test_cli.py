@@ -341,3 +341,36 @@ def test_backfill_cwe_not_available(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["backfill", "cwe"])
     assert result.exit_code != 0
     assert "cwe" in result.output  # Choice 外の invalid choice エラー
+
+
+def test_update_cloudflare_waf_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_cloudflare_waf",
+        lambda cfg: "published 2026-07-16 (3 records)",
+    )
+    result = CliRunner().invoke(main, ["update", "cloudflare_waf"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-16" in result.output
+
+
+def test_update_cloudflare_waf_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(
+        main, ["update", "cloudflare_waf", "--date", "2026-07-01"]
+    )
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_cloudflare_waf_is_not_supported(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "cloudflare_waf"])
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output
