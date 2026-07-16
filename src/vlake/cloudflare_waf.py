@@ -123,6 +123,8 @@ def _text(value: str) -> str:
 def _doc_url(source_path: str) -> str:
     """GitHub 内パスから developers.cloudflare.com の公開 URL を作る。"""
     name = Path(source_path).name.removesuffix(".mdx")
+    if source_path == "src/content/changelog/waf/scheduled-waf-release.mdx":
+        return f"{_DOC_BASE}/waf/change-log/scheduled-changes/"
     if source_path.startswith("src/content/changelog/waf/"):
         return f"{_DOC_BASE}/changelog/{name}/"
     if source_path.startswith("src/content/docs/waf/change-log/"):

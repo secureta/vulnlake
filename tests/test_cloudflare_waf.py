@@ -53,6 +53,26 @@ This release adds detections for Ivanti EPMM (CVE-2026-1281 and CVE-2026-1340).
     assert "CVE-2026-1281" in rows[0]["matched_text"]
 
 
+def test_parse_scheduled_changelog_uses_scheduled_changes_url():
+    raw = b"""---
+title: WAF Release - Scheduled changes for 2026-07-20
+date: 2026-07-14
+publish_future_dated_entry: true
+---
+
+<td>Adobe ColdFusion - Path Traversal - CVE:CVE-2026-48282</td>
+"""
+
+    rows = cloudflare_waf.parse_markdown(
+        "src/content/changelog/waf/scheduled-waf-release.mdx", raw
+    )
+
+    assert rows[0]["identifier"] == "CVE-2026-48282"
+    assert rows[0]["source_url"] == (
+        "https://developers.cloudflare.com/waf/change-log/scheduled-changes/"
+    )
+
+
 def test_parse_historical_table_uses_row_description_and_change_date():
     raw = b"""---
 title: "Historical (2024)"
