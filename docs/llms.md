@@ -29,9 +29,7 @@ DESCRIBE vlake.<table>;
   `vlake.attack_history`, `vlake.attack_relationship_history`,
   `vlake.capec_history`, and `vlake.kev_history`.
 - `vlake.epss` is daily history. There is no separate latest EPSS view.
-- Use `vlake.cve_ssvc_candidates` for CISA Coordinator SSVC decision candidates
-  for a CVE. Missing recorded parameters, especially `mission_impact`, expand
-  to all possible values from `vlake.ssvc_decision`.
+- Use `vlake.cve_ssvc_candidates` for CISA Coordinator SSVC decision candidates; missing recorded parameters expand to all values from `vlake.ssvc_decision`.
 - For tombstone views, add `AND NOT removed` unless the user explicitly wants
   withdrawn or deleted upstream records: `vlake.nuclei` and `vlake.kev`.
 - Use `list_contains(array_column, 'CVE-...')` for array columns such as
@@ -50,10 +48,7 @@ DESCRIBE vlake.<table>;
 | EPSS exploit prediction over time | `vlake.epss` |
 | Current CVE List V5 record | `vlake.cve` |
 | CVE record changes over time | `vlake.cve_history` |
-| Current CISA Coordinator SSVC values | `vlake.cve_ssvc` |
-| CISA Coordinator SSVC changes over time | `vlake.cve_ssvc_history` |
 | CISA Coordinator SSVC decision candidates for a CVE | `vlake.cve_ssvc_candidates` |
-| CISA Coordinator SSVC decision table | `vlake.ssvc_decision` |
 | Current GitHub-reviewed advisories | `vlake.ghsa` |
 | GHSA advisory changes over time | `vlake.ghsa_history` |
 | Current ExploitDB metadata | `vlake.exploitdb` |
@@ -101,27 +96,11 @@ ORDER BY date_updated;
 CISA Coordinator SSVC decision candidates for a CVE:
 
 ```sql
-SELECT
-  cve,
-  exploitation,
-  automatable,
-  technical_impact,
-  mission_impact,
-  recorded_decision,
-  computed_decision,
-  decision_matches
+SELECT exploitation, automatable, technical_impact, mission_impact,
+       recorded_decision, computed_decision, decision_matches
 FROM vlake.cve_ssvc_candidates
 WHERE cve = 'CVE-2023-38205'
 ORDER BY decision_rank, mission_impact;
-```
-
-CISA Coordinator SSVC decision table with partial input:
-
-```sql
-SELECT exploitation, automatable, technical_impact, mission_impact, decision
-FROM vlake.ssvc_decision
-WHERE exploitation = 'active'
-  AND automatable = 'no';
 ```
 
 Current GHSA advisories for a CVE:
