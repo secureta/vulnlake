@@ -49,6 +49,53 @@ CVE_SOURCES_COLUMNS = [
     ("nuclei_count", "BIGINT"),
     ("cloudflare_waf_count", "BIGINT"),
 ]
+CVE_SSVC_COLUMNS = [
+    ("cve", "VARCHAR"),
+    ("date_updated", "TIMESTAMP"),
+    ("ssvc_version", "VARCHAR"),
+    ("ssvc_role", "VARCHAR"),
+    ("ssvc_timestamp", "TIMESTAMP"),
+    ("ssvc_provider", "VARCHAR"),
+    ("exploitation", "VARCHAR"),
+    ("automatable", "VARCHAR"),
+    ("technical_impact", "VARCHAR"),
+    ("mission_impact", "VARCHAR"),
+    ("recorded_decision", "VARCHAR"),
+    ("ssvc_raw", "VARCHAR"),
+]
+SSVC_DECISION_COLUMNS = [
+    ("ssvc_version", "VARCHAR"),
+    ("ssvc_role", "VARCHAR"),
+    ("exploitation", "VARCHAR"),
+    ("automatable", "VARCHAR"),
+    ("technical_impact", "VARCHAR"),
+    ("mission_impact", "VARCHAR"),
+    ("decision", "VARCHAR"),
+    ("decision_label", "VARCHAR"),
+    ("decision_rank", "INTEGER"),
+]
+CVE_SSVC_CANDIDATES_COLUMNS = [
+    ("cve", "VARCHAR"),
+    ("date_updated", "TIMESTAMP"),
+    ("ssvc_version", "VARCHAR"),
+    ("ssvc_role", "VARCHAR"),
+    ("ssvc_timestamp", "TIMESTAMP"),
+    ("ssvc_provider", "VARCHAR"),
+    ("exploitation", "VARCHAR"),
+    ("automatable", "VARCHAR"),
+    ("technical_impact", "VARCHAR"),
+    ("mission_impact", "VARCHAR"),
+    ("recorded_exploitation", "VARCHAR"),
+    ("recorded_automatable", "VARCHAR"),
+    ("recorded_technical_impact", "VARCHAR"),
+    ("recorded_mission_impact", "VARCHAR"),
+    ("recorded_decision", "VARCHAR"),
+    ("computed_decision", "VARCHAR"),
+    ("decision_matches", "BOOLEAN"),
+    ("decision_label", "VARCHAR"),
+    ("decision_rank", "INTEGER"),
+    ("ssvc_raw", "VARCHAR"),
+]
 CWE_ATTACK_PATTERNS_COLUMNS = [
     ("cwe", "VARCHAR"),
     ("capec_id", "VARCHAR"),
@@ -183,6 +230,9 @@ def main() -> int:
     }
     expected["datasets"] = DATASETS_COLUMNS
     expected["cve_sources"] = CVE_SOURCES_COLUMNS
+    expected["cve_ssvc"] = CVE_SSVC_COLUMNS
+    expected["ssvc_decision"] = SSVC_DECISION_COLUMNS
+    expected["cve_ssvc_candidates"] = CVE_SSVC_CANDIDATES_COLUMNS
     expected["cwe_attack_patterns"] = CWE_ATTACK_PATTERNS_COLUMNS
     actual = parse_schema_doc_tables()
 

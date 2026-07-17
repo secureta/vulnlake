@@ -56,6 +56,49 @@ def _make_cve_parquet(tmp_path: Path, cve_id: str, updated: str, name: str) -> P
     return out
 
 
+def _ssvc_metric(
+    *,
+    exploitation: str | None = "active",
+    automatable: str | None = "yes",
+    technical_impact: str | None = "partial",
+    mission_impact: str | None = None,
+    decision: str | None = None,
+    role: str = "CISA Coordinator",
+    version: str = "2.0.3",
+    timestamp: str = "2024-09-16T19:00:51.927416Z",
+) -> dict:
+    """CISA ADP Vulnrichment の SSVC metric 断片を作る。"""
+    options = []
+    if exploitation is not None:
+        options.append({"Exploitation": exploitation})
+    if automatable is not None:
+        options.append({"Automatable": automatable})
+    if technical_impact is not None:
+        options.append({"Technical Impact": technical_impact})
+    if mission_impact is not None:
+        options.append({"Mission and Well-Being Impact": mission_impact})
+    content = {
+        "id": "CVE-2024-0001",
+        "role": role,
+        "options": options,
+        "version": version,
+        "timestamp": timestamp,
+    }
+    if decision is not None:
+        content["decision"] = decision
+    return {"other": {"type": "ssvc", "content": content}}
+
+
+def _cve_raw_with_ssvc(cve_id: str, **kwargs) -> str:
+    """SSVC 付き CVE JSON 5.x 文字列を作る。"""
+    rec = make_cve_record(
+        cve_id,
+        date_updated=kwargs.pop("date_updated", "2026-07-10T00:00:00Z"),
+        adp_metrics=[_ssvc_metric(**kwargs)],
+    )
+    return json.dumps(rec)
+
+
 def test_cve_history_and_latest_view(tmp_path):
     catalog = tmp_path / "vlake.ducklake"
     old = _make_cve_parquet(
@@ -81,6 +124,238 @@ def test_cve_history_and_latest_view(tmp_path):
     assert con.execute("SELECT count(*) FROM frozen.cve_history").fetchone()[0] == 2
     rows = con.execute("SELECT cve, date_updated FROM frozen.cve").fetchall()
     assert rows == [("CVE-2021-0001", datetime(2026, 1, 1))]
+
+
+def test_cve_ssvc_history_view_extracts_cisa_coordinator_ssvc(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES (?, TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [
+                "CVE-2024-0001",
+                _cve_raw_with_ssvc(
+                    "CVE-2024-0001",
+                    exploitation="active",
+                    automatable="yes",
+                    technical_impact="partial",
+                    mission_impact="high",
+                    decision="act",
+                ),
+            ],
+        )
+
+        lake.refresh_cve_ssvc_history_view()
+        lake.refresh_cve_ssvc_history_view()  # 再実行しても壊れない
+        rows = lake.query(
+            "SELECT cve, ssvc_version, ssvc_role, ssvc_provider, "
+            "exploitation, automatable, technical_impact, mission_impact, "
+            "recorded_decision, ssvc_timestamp, ssvc_raw "
+            "FROM lake.cve_ssvc_history"
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row[:9] == (
+            "CVE-2024-0001",
+            "2.0.3",
+            "CISA Coordinator",
+            "CISA ADP Vulnrichment",
+            "active",
+            "yes",
+            "partial",
+            "high",
+            "act",
+        )
+        assert row[9] == datetime(2024, 9, 16, 19, 0, 51, 927416)
+        assert json.loads(row[10])["other"]["type"] == "ssvc"
+    finally:
+        lake.close()
+
+
+def test_cve_ssvc_view_uses_latest_cve_view(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES "
+            "('CVE-2024-0001', TIMESTAMP '2026-07-09 00:00:00', ?), "
+            "('CVE-2024-0001', TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [
+                _cve_raw_with_ssvc(
+                    "CVE-2024-0001",
+                    date_updated="2026-07-09T00:00:00Z",
+                    exploitation="none",
+                ),
+                _cve_raw_with_ssvc(
+                    "CVE-2024-0001",
+                    date_updated="2026-07-10T00:00:00Z",
+                    exploitation="active",
+                ),
+            ],
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_cve_ssvc_view()
+        got = lake.query("SELECT cve, exploitation FROM lake.cve_ssvc")
+        assert got == [("CVE-2024-0001", "active")]
+    finally:
+        lake.close()
+
+
+def test_cve_ssvc_views_ignore_non_ssvc_and_missing_cisa_adp(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        no_adp = json.dumps(make_cve_record("CVE-2024-0002"))
+        wrong_role = json.dumps(
+            make_cve_record(
+                "CVE-2024-0003",
+                adp_metrics=[_ssvc_metric(role="Supplier")],
+            )
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES "
+            "('CVE-2024-0002', TIMESTAMP '2026-07-10 00:00:00', ?), "
+            "('CVE-2024-0003', TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [no_adp, wrong_role],
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_cve_ssvc_history_view()
+        lake.refresh_cve_ssvc_view()
+        assert lake.query("SELECT count(*) FROM lake.cve_ssvc_history") == [(0,)]
+        assert lake.query("SELECT count(*) FROM lake.cve_ssvc") == [(0,)]
+    finally:
+        lake.close()
+
+
+def test_ssvc_decision_view_supports_partial_input_queries(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.refresh_ssvc_decision_view()
+        assert lake.query("SELECT count(*) FROM lake.ssvc_decision") == [(36,)]
+        got = lake.query(
+            "SELECT mission_impact, decision, decision_label, decision_rank "
+            "FROM lake.ssvc_decision "
+            "WHERE exploitation = 'active' "
+            "  AND automatable = 'no' "
+            "  AND technical_impact = 'total' "
+            "ORDER BY mission_impact"
+        )
+        assert got == [
+            ("high", "act", "Act", 4),
+            ("low", "track", "Track", 1),
+            ("medium", "attend", "Attend", 3),
+        ]
+    finally:
+        lake.close()
+
+
+def test_cve_ssvc_candidates_expands_missing_parameters_and_compares_decision(
+    tmp_path,
+):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES (?, TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [
+                "CVE-2024-0001",
+                _cve_raw_with_ssvc(
+                    "CVE-2024-0001",
+                    exploitation="active",
+                    automatable="no",
+                    technical_impact="total",
+                    mission_impact=None,
+                    decision="act",
+                ),
+            ],
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_cve_ssvc_view()
+        lake.refresh_ssvc_decision_view()
+        lake.refresh_cve_ssvc_candidates_view()
+        rows = lake.query(
+            "SELECT exploitation, automatable, technical_impact, mission_impact, "
+            "recorded_exploitation, recorded_automatable, recorded_technical_impact, "
+            "recorded_mission_impact, recorded_decision, computed_decision, "
+            "decision_matches, decision_rank "
+            "FROM lake.cve_ssvc_candidates "
+            "WHERE cve = 'CVE-2024-0001' "
+            "ORDER BY decision_rank, mission_impact"
+        )
+        assert rows == [
+            (
+                "active",
+                "no",
+                "total",
+                "low",
+                "active",
+                "no",
+                "total",
+                None,
+                "act",
+                "track",
+                False,
+                1,
+            ),
+            (
+                "active",
+                "no",
+                "total",
+                "medium",
+                "active",
+                "no",
+                "total",
+                None,
+                "act",
+                "attend",
+                False,
+                3,
+            ),
+            (
+                "active",
+                "no",
+                "total",
+                "high",
+                "active",
+                "no",
+                "total",
+                None,
+                "act",
+                "act",
+                True,
+                4,
+            ),
+        ]
+    finally:
+        lake.close()
+
+
+def test_cve_ssvc_candidates_returns_zero_rows_without_ssvc(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES "
+            "('CVE-2024-0002', TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [json.dumps(make_cve_record("CVE-2024-0002"))],
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_cve_ssvc_view()
+        lake.refresh_ssvc_decision_view()
+        lake.refresh_cve_ssvc_candidates_view()
+        assert lake.query("SELECT count(*) FROM lake.cve_ssvc_candidates") == [(0,)]
+    finally:
+        lake.close()
 
 
 def test_registered_paths_scoped_by_table(tmp_path):

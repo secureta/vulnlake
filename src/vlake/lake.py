@@ -260,6 +260,204 @@ class Lake:
             f"QUALIFY row_number() OVER (PARTITION BY cve ORDER BY date_updated DESC) = 1"
         )
 
+    def _refresh_cve_ssvc_view(self, source: str, target: str) -> None:
+        """CVE JSON 5.x raw から CISA Coordinator SSVC を抽出する view を作る。"""
+        self.con.execute(
+            # ALIAS はクラス定数、source/target は呼び出し側の固定文字列
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.{target} AS
+            WITH
+            ssvc_metrics AS (
+                SELECT
+                    src.cve,
+                    src.date_updated,
+                    json_extract_string(metric, '$.other.content.version') AS ssvc_version,
+                    json_extract_string(metric, '$.other.content.role') AS ssvc_role,
+                    try_cast(
+                        json_extract_string(metric, '$.other.content.timestamp') AS TIMESTAMP
+                    ) AS ssvc_timestamp,
+                    coalesce(
+                        json_extract_string(adp, '$.title'),
+                        json_extract_string(adp, '$.providerMetadata.shortName')
+                    ) AS ssvc_provider,
+                    lower(json_extract_string(metric, '$.other.content.decision'))
+                        AS recorded_decision,
+                    cast(metric AS VARCHAR) AS ssvc_raw,
+                    metric
+                FROM {self.ALIAS}.{source} AS src
+                JOIN UNNEST(
+                    coalesce(json_extract(src.raw, '$.containers.adp')::JSON[], []::JSON[])
+                ) AS adp_items(adp) ON true
+                JOIN UNNEST(
+                    coalesce(json_extract(adp, '$.metrics')::JSON[], []::JSON[])
+                ) AS metric_items(metric) ON true
+                WHERE (
+                    json_extract_string(adp, '$.title') = 'CISA ADP Vulnrichment'
+                    OR json_extract_string(adp, '$.providerMetadata.shortName') = 'CISA-ADP'
+                )
+                  AND lower(json_extract_string(metric, '$.other.type')) = 'ssvc'
+                  AND json_extract_string(metric, '$.other.content.role') = 'CISA Coordinator'
+            ),
+            expanded_options AS (
+                SELECT ssvc_metrics.*, opt
+                FROM ssvc_metrics
+                LEFT JOIN UNNEST(
+                    coalesce(
+                        json_extract(metric, '$.other.content.options')::JSON[],
+                        []::JSON[]
+                    )
+                ) AS option_items(opt) ON true
+            )
+            SELECT
+                cve,
+                date_updated,
+                ssvc_version,
+                ssvc_role,
+                ssvc_timestamp,
+                ssvc_provider,
+                max(
+                    CASE WHEN json_extract_string(opt, '$.Exploitation') IS NOT NULL
+                    THEN lower(json_extract_string(opt, '$.Exploitation')) END
+                ) AS exploitation,
+                max(
+                    CASE WHEN json_extract_string(opt, '$.Automatable') IS NOT NULL
+                    THEN lower(json_extract_string(opt, '$.Automatable')) END
+                ) AS automatable,
+                max(
+                    CASE WHEN json_extract_string(opt, '$.Technical Impact') IS NOT NULL
+                    THEN lower(json_extract_string(opt, '$.Technical Impact')) END
+                ) AS technical_impact,
+                max(
+                    CASE
+                    WHEN json_extract_string(opt, '$."Mission and Well-Being Impact"') IS NOT NULL
+                    THEN lower(json_extract_string(opt, '$."Mission and Well-Being Impact"'))
+                    END
+                ) AS mission_impact,
+                recorded_decision,
+                ssvc_raw
+            FROM expanded_options
+            GROUP BY
+                cve,
+                date_updated,
+                ssvc_version,
+                ssvc_role,
+                ssvc_timestamp,
+                ssvc_provider,
+                recorded_decision,
+                ssvc_raw"""  # noqa: S608
+        )
+
+    def refresh_cve_ssvc_history_view(self) -> None:
+        """cve_history から CISA Coordinator SSVC 履歴を抽出する view。"""
+        self._refresh_cve_ssvc_view("cve_history", "cve_ssvc_history")
+
+    def refresh_cve_ssvc_view(self) -> None:
+        """最新 cve view から CISA Coordinator SSVC を抽出する view。"""
+        self._refresh_cve_ssvc_view("cve", "cve_ssvc")
+
+    def refresh_ssvc_decision_view(self) -> None:
+        """CISA Coordinator SSVC 2.0.3 の decision table を公開する view。"""
+        self.con.execute(
+            # ALIAS はクラス定数、VALUES は固定表
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.ssvc_decision AS
+            SELECT
+                '2.0.3' AS ssvc_version,
+                'CISA Coordinator' AS ssvc_role,
+                exploitation,
+                automatable,
+                technical_impact,
+                mission_impact,
+                decision,
+                CASE decision
+                    WHEN 'track' THEN 'Track'
+                    WHEN 'track*' THEN 'Track*'
+                    WHEN 'attend' THEN 'Attend'
+                    WHEN 'act' THEN 'Act'
+                END AS decision_label,
+                CASE decision
+                    WHEN 'track' THEN 1
+                    WHEN 'track*' THEN 2
+                    WHEN 'attend' THEN 3
+                    WHEN 'act' THEN 4
+                END AS decision_rank
+            FROM (VALUES
+                ('none', 'no', 'partial', 'low', 'track'),
+                ('none', 'no', 'partial', 'medium', 'track'),
+                ('none', 'no', 'partial', 'high', 'track'),
+                ('none', 'no', 'total', 'low', 'track'),
+                ('none', 'no', 'total', 'medium', 'track'),
+                ('none', 'no', 'total', 'high', 'track*'),
+                ('none', 'yes', 'partial', 'low', 'track'),
+                ('none', 'yes', 'partial', 'medium', 'track'),
+                ('none', 'yes', 'partial', 'high', 'attend'),
+                ('none', 'yes', 'total', 'low', 'track'),
+                ('none', 'yes', 'total', 'medium', 'track'),
+                ('none', 'yes', 'total', 'high', 'attend'),
+                ('public poc', 'no', 'partial', 'low', 'track'),
+                ('public poc', 'no', 'partial', 'medium', 'track'),
+                ('public poc', 'no', 'partial', 'high', 'track*'),
+                ('public poc', 'no', 'total', 'low', 'track'),
+                ('public poc', 'no', 'total', 'medium', 'track*'),
+                ('public poc', 'no', 'total', 'high', 'attend'),
+                ('public poc', 'yes', 'partial', 'low', 'track'),
+                ('public poc', 'yes', 'partial', 'medium', 'track'),
+                ('public poc', 'yes', 'partial', 'high', 'attend'),
+                ('public poc', 'yes', 'total', 'low', 'track'),
+                ('public poc', 'yes', 'total', 'medium', 'track*'),
+                ('public poc', 'yes', 'total', 'high', 'attend'),
+                ('active', 'no', 'partial', 'low', 'track'),
+                ('active', 'no', 'partial', 'medium', 'track'),
+                ('active', 'no', 'partial', 'high', 'attend'),
+                ('active', 'no', 'total', 'low', 'track'),
+                ('active', 'no', 'total', 'medium', 'attend'),
+                ('active', 'no', 'total', 'high', 'act'),
+                ('active', 'yes', 'partial', 'low', 'attend'),
+                ('active', 'yes', 'partial', 'medium', 'attend'),
+                ('active', 'yes', 'partial', 'high', 'act'),
+                ('active', 'yes', 'total', 'low', 'attend'),
+                ('active', 'yes', 'total', 'medium', 'act'),
+                ('active', 'yes', 'total', 'high', 'act')
+            ) AS t(exploitation, automatable, technical_impact, mission_impact, decision)"""  # noqa: S608
+        )
+
+    def refresh_cve_ssvc_candidates_view(self) -> None:
+        """CVE 記録値を起点に不足 SSVC パラメータを展開した decision 候補 view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.cve_ssvc_candidates AS
+            SELECT
+                s.cve,
+                s.date_updated,
+                coalesce(s.ssvc_version, d.ssvc_version) AS ssvc_version,
+                coalesce(s.ssvc_role, d.ssvc_role) AS ssvc_role,
+                s.ssvc_timestamp,
+                s.ssvc_provider,
+                d.exploitation,
+                d.automatable,
+                d.technical_impact,
+                d.mission_impact,
+                s.exploitation AS recorded_exploitation,
+                s.automatable AS recorded_automatable,
+                s.technical_impact AS recorded_technical_impact,
+                s.mission_impact AS recorded_mission_impact,
+                s.recorded_decision,
+                d.decision AS computed_decision,
+                CASE
+                    WHEN s.recorded_decision IS NULL OR d.decision IS NULL THEN NULL
+                    ELSE s.recorded_decision = d.decision
+                END AS decision_matches,
+                d.decision_label,
+                d.decision_rank,
+                s.ssvc_raw
+            FROM {self.ALIAS}.cve_ssvc AS s
+            JOIN {self.ALIAS}.ssvc_decision AS d
+              ON (s.ssvc_version IS NULL OR s.ssvc_version = d.ssvc_version)
+             AND (s.ssvc_role IS NULL OR s.ssvc_role = d.ssvc_role)
+             AND (s.exploitation IS NULL OR s.exploitation = d.exploitation)
+             AND (s.automatable IS NULL OR s.automatable = d.automatable)
+             AND (s.technical_impact IS NULL OR s.technical_impact = d.technical_impact)
+             AND (s.mission_impact IS NULL OR s.mission_impact = d.mission_impact)"""  # noqa: S608
+        )
+
     def max_ghsa_modified(self):
         """ghsa_history の最新 modified (空なら None)。日次差分の判定に使う。"""
         return self.con.execute(

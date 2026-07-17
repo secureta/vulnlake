@@ -10,6 +10,10 @@ records that disappeared upstream.
 | `epss` | `epss` | CVE × date | EPSS exploit-prediction scores (full daily history) |
 | `cve` | `cve_history` | CVE | CVE List V5 records (MITRE/CNA) |
 | `cve_sources` | *(view)* | CVE | Cross-dataset presence summary for each CVE |
+| `cve_ssvc` | *(view)* | CVE × SSVC metric | CISA Coordinator SSVC values extracted from latest CVE records |
+| `cve_ssvc_history` | *(view)* | CVE history row × SSVC metric | CISA Coordinator SSVC values extracted from CVE record history |
+| `ssvc_decision` | *(view)* | SSVC parameter combination | CISA Coordinator SSVC 2.0.3 decision table |
+| `cve_ssvc_candidates` | *(view)* | CVE × decision candidate | Decision candidates expanded from recorded CVE SSVC values |
 | `ghsa` | `ghsa_history` | GHSA ID | GitHub-reviewed advisories with affected package ranges |
 | `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
@@ -78,6 +82,76 @@ It is derived from `epss`, `cve`, `ghsa`, `exploitdb`, `nuclei`, `kev`, and
 | `exploitdb_count` | BIGINT | Number of linked ExploitDB entries |
 | `nuclei_count` | BIGINT | Number of linked currently-live nuclei templates |
 | `cloudflare_waf_count` | BIGINT | Number of linked currently-live Cloudflare WAF ChangeLog mentions |
+
+### `cve_ssvc` / `cve_ssvc_history` — CISA Coordinator SSVC from CVE List V5
+
+Views that extract CISA Coordinator SSVC metrics from the CVE List V5 `raw`
+JSON. `cve_ssvc` reads the latest `cve` view. `cve_ssvc_history` reads
+`cve_history` so SSVC changes can be audited over time. CVEs without CISA ADP
+Vulnrichment SSVC rows do not appear in these views.
+
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `date_updated` | TIMESTAMP | CVE record update time |
+| `ssvc_version` | VARCHAR | SSVC decision table version from the record, currently `2.0.3` for CISA Coordinator rows |
+| `ssvc_role` | VARCHAR | SSVC role, currently `CISA Coordinator` |
+| `ssvc_timestamp` | TIMESTAMP | SSVC assessment timestamp |
+| `ssvc_provider` | VARCHAR | ADP provider/title, typically `CISA ADP Vulnrichment` |
+| `exploitation` | VARCHAR | Recorded SSVC Exploitation value (`none`, `public poc`, `active`) |
+| `automatable` | VARCHAR | Recorded SSVC Automatable value (`yes`, `no`) |
+| `technical_impact` | VARCHAR | Recorded SSVC Technical Impact value (`partial`, `total`) |
+| `mission_impact` | VARCHAR | Recorded Mission and Well-Being Impact value if present; CISA Vulnrichment CVE rows often omit it |
+| `recorded_decision` | VARCHAR | Decision recorded in CVE JSON if present |
+| `ssvc_raw` | VARCHAR | SSVC metric JSON fragment extracted from the CVE record |
+
+### `ssvc_decision` — CISA Coordinator SSVC decision table
+
+CISA Coordinator SSVC 2.0.3 decision table. Filter any subset of parameter
+columns to get all matching decisions; omitted parameters naturally return all
+possible values.
+
+| Column | Type | Description |
+|---|---|---|
+| `ssvc_version` | VARCHAR | SSVC decision table version (`2.0.3`) |
+| `ssvc_role` | VARCHAR | SSVC role (`CISA Coordinator`) |
+| `exploitation` | VARCHAR | Exploitation value (`none`, `public poc`, `active`) |
+| `automatable` | VARCHAR | Automatable value (`yes`, `no`) |
+| `technical_impact` | VARCHAR | Technical Impact value (`partial`, `total`) |
+| `mission_impact` | VARCHAR | Mission and Well-Being Impact value (`low`, `medium`, `high`) |
+| `decision` | VARCHAR | Computed CISA decision (`track`, `track*`, `attend`, `act`) |
+| `decision_label` | VARCHAR | Display label (`Track`, `Track*`, `Attend`, `Act`) |
+| `decision_rank` | INTEGER | Sort key from lowest to highest urgency (`track` = 1, `act` = 4) |
+
+### `cve_ssvc_candidates` — CVE-based SSVC decision candidates
+
+Joins `cve_ssvc` to `ssvc_decision`. Recorded CVE SSVC values constrain the
+join. Missing recorded parameters expand to every value from `ssvc_decision`,
+so CVEs with partial SSVC data return every possible decision candidate. CVEs
+without SSVC data return zero rows.
+
+| Column | Type | Description |
+|---|---|---|
+| `cve` | VARCHAR | CVE ID |
+| `date_updated` | TIMESTAMP | Latest CVE record update time |
+| `ssvc_version` | VARCHAR | SSVC decision table version used for candidate computation |
+| `ssvc_role` | VARCHAR | SSVC role used for candidate computation |
+| `ssvc_timestamp` | TIMESTAMP | Recorded SSVC assessment timestamp |
+| `ssvc_provider` | VARCHAR | ADP provider/title |
+| `exploitation` | VARCHAR | Candidate Exploitation value |
+| `automatable` | VARCHAR | Candidate Automatable value |
+| `technical_impact` | VARCHAR | Candidate Technical Impact value |
+| `mission_impact` | VARCHAR | Candidate Mission and Well-Being Impact value |
+| `recorded_exploitation` | VARCHAR | Exploitation value recorded in CVE JSON, or NULL if missing |
+| `recorded_automatable` | VARCHAR | Automatable value recorded in CVE JSON, or NULL if missing |
+| `recorded_technical_impact` | VARCHAR | Technical Impact value recorded in CVE JSON, or NULL if missing |
+| `recorded_mission_impact` | VARCHAR | Mission and Well-Being Impact value recorded in CVE JSON, or NULL if missing |
+| `recorded_decision` | VARCHAR | Decision recorded in CVE JSON if present |
+| `computed_decision` | VARCHAR | Decision computed from `ssvc_decision` |
+| `decision_matches` | BOOLEAN | Whether `recorded_decision` equals `computed_decision`; NULL when no recorded decision exists |
+| `decision_label` | VARCHAR | Display label for `computed_decision` |
+| `decision_rank` | INTEGER | Sort key from lowest to highest urgency |
+| `ssvc_raw` | VARCHAR | SSVC metric JSON fragment extracted from the CVE record |
 
 ### `ghsa` / `ghsa_history` — GitHub Advisory Database
 

@@ -105,6 +105,27 @@ LEFT JOIN (
 WHERE c.cve = 'CVE-2021-44228';
 ```
 
+### Check CISA Coordinator SSVC candidates
+
+CVE List V5 can include CISA ADP Vulnrichment SSVC values. When a CVE record
+omits parameters needed for a decision, `cve_ssvc_candidates` expands the
+missing values and returns every possible computed decision.
+
+```sql
+SELECT
+  cve,
+  exploitation,
+  automatable,
+  technical_impact,
+  mission_impact,
+  recorded_decision,
+  computed_decision,
+  decision_matches
+FROM vlake.cve_ssvc_candidates
+WHERE cve = 'CVE-2023-38205'
+ORDER BY decision_rank, mission_impact;
+```
+
 ### Find GitHub advisories and affected packages
 
 ```sql
@@ -221,6 +242,9 @@ records that disappeared upstream.
 | `epss` | `epss` | CVE × date | EPSS exploit-prediction scores (full daily history) |
 | `cve` | `cve_history` | CVE | CVE List V5 records (MITRE/CNA) |
 | `cve_sources` | *(view)* | CVE | Cross-dataset presence summary for each CVE |
+| `cve_ssvc` | *(view)* | CVE × SSVC metric | CISA Coordinator SSVC values extracted from latest CVE records |
+| `cve_ssvc_candidates` | *(view)* | CVE × decision candidate | CISA Coordinator SSVC decision candidates expanded from recorded CVE values |
+| `ssvc_decision` | *(view)* | SSVC parameter combination | CISA Coordinator SSVC 2.0.3 decision table |
 | `ghsa` | `ghsa_history` | GHSA ID | GitHub-reviewed advisories with affected package ranges |
 | `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |

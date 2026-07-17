@@ -29,6 +29,7 @@ DESCRIBE vlake.<table>;
   `vlake.attack_history`, `vlake.attack_relationship_history`,
   `vlake.capec_history`, and `vlake.kev_history`.
 - `vlake.epss` is daily history. There is no separate latest EPSS view.
+- Use `vlake.cve_ssvc_candidates` for CISA Coordinator SSVC decision candidates; missing recorded parameters expand to all values from `vlake.ssvc_decision`.
 - For tombstone views, add `AND NOT removed` unless the user explicitly wants
   withdrawn or deleted upstream records: `vlake.nuclei` and `vlake.kev`.
 - Use `list_contains(array_column, 'CVE-...')` for array columns such as
@@ -47,6 +48,7 @@ DESCRIBE vlake.<table>;
 | EPSS exploit prediction over time | `vlake.epss` |
 | Current CVE List V5 record | `vlake.cve` |
 | CVE record changes over time | `vlake.cve_history` |
+| CISA Coordinator SSVC decision candidates for a CVE | `vlake.cve_ssvc_candidates` |
 | Current GitHub-reviewed advisories | `vlake.ghsa` |
 | GHSA advisory changes over time | `vlake.ghsa_history` |
 | Current ExploitDB metadata | `vlake.exploitdb` |
@@ -89,6 +91,16 @@ SELECT cve, state, title, cvss, cvss_severity, date_updated
 FROM vlake.cve_history
 WHERE cve = 'CVE-2021-44228'
 ORDER BY date_updated;
+```
+
+CISA Coordinator SSVC decision candidates for a CVE:
+
+```sql
+SELECT exploitation, automatable, technical_impact, mission_impact,
+       recorded_decision, computed_decision, decision_matches
+FROM vlake.cve_ssvc_candidates
+WHERE cve = 'CVE-2023-38205'
+ORDER BY decision_rank, mission_impact;
 ```
 
 Current GHSA advisories for a CVE:
