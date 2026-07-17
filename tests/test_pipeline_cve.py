@@ -27,6 +27,31 @@ def _attach(cfg):
     return con
 
 
+def _ssvc_metric(
+    *,
+    exploitation: str = "active",
+    automatable: str = "no",
+    technical_impact: str = "total",
+) -> dict:
+    """CISA Coordinator SSVC 2.0.3 の metric 断片を作る。"""
+    return {
+        "other": {
+            "type": "ssvc",
+            "content": {
+                "id": "CVE-2024-0001",
+                "role": "CISA Coordinator",
+                "options": [
+                    {"Exploitation": exploitation},
+                    {"Automatable": automatable},
+                    {"Technical Impact": technical_impact},
+                ],
+                "version": "2.0.3",
+                "timestamp": "2024-09-16T19:00:51.927416Z",
+            },
+        }
+    }
+
+
 def _records():
     return [
         make_cve_record("CVE-2021-44228", date_updated="2025-10-21T23:25:23.121Z"),
@@ -240,7 +265,12 @@ def test_rebuild_catalog_covers_both_datasets(cfg, tmp_path, monkeypatch):
     from vlake import epss
 
     zp = tmp_path / "initial.zip"
-    make_baseline_zip(zp, _records())
+    ssvc_record = make_cve_record(
+        "CVE-2024-0001",
+        date_updated="2026-07-10T00:00:00Z",
+        adp_metrics=[_ssvc_metric()],
+    )
+    make_baseline_zip(zp, [ssvc_record, *_records()])
     pipeline.backfill_cve(cfg, source_zip=zp)
     raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
     monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
@@ -251,5 +281,14 @@ def test_rebuild_catalog_covers_both_datasets(cfg, tmp_path, monkeypatch):
 
     con = _attach(cfg)
     assert con.execute("SELECT count(*) FROM frozen.epss").fetchone()[0] == 1
-    assert con.execute("SELECT count(*) FROM frozen.cve_history").fetchone()[0] == 3
-    assert con.execute("SELECT count(*) FROM frozen.cve").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM frozen.cve_history").fetchone()[0] == 4
+    assert con.execute("SELECT count(*) FROM frozen.cve").fetchone()[0] == 4
+    assert con.execute("SELECT count(*) FROM frozen.ssvc_decision").fetchone()[0] == 36
+    assert con.execute("SELECT count(*) FROM frozen.cve_ssvc").fetchone()[0] == 1
+    assert (
+        con.execute(
+            "SELECT computed_decision FROM frozen.cve_ssvc_candidates "
+            "WHERE cve = 'CVE-2024-0001' AND mission_impact = 'high'"
+        ).fetchone()[0]
+        == "act"
+    )

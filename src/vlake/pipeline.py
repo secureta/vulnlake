@@ -80,6 +80,10 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
         ]
     )
     lake.refresh_cve_view()
+    lake.refresh_ssvc_decision_view()
+    lake.refresh_cve_ssvc_history_view()
+    lake.refresh_cve_ssvc_view()
+    lake.refresh_cve_ssvc_candidates_view()
     lake.refresh_ghsa_view()
     lake.refresh_exploitdb_view()
     lake.refresh_nuclei_view()
