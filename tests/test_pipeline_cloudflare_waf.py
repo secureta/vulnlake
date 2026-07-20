@@ -214,6 +214,27 @@ def test_cve_sources_covers_cloudflare_waf(cfg, monkeypatch):
     con.close()
 
 
+def test_verify_cloudflare_waf_no_new_records_is_not_stale(cfg, monkeypatch):
+    _patch_download(monkeypatch, _initial_files())
+    pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 16))
+    assert (
+        pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 20))
+        == "no-new-records 2026-07-20"
+    )
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 7, 20)
+
+    monkeypatch.setattr(pipeline, "date", FrozenDate)
+
+    report = pipeline.verify(cfg, max_age_days=3)
+
+    assert report["stale"] is False
+    assert report["datasets"]["cloudflare_waf"]["stale"] is False
+
+
 def test_verify_and_rebuild_cover_cloudflare_waf(cfg, monkeypatch):
     _patch_download(monkeypatch, _initial_files())
     pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 16))

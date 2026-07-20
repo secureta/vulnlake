@@ -1101,7 +1101,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                 "cloudflare_waf": _verify_history(
                     storage,
                     lake,
-                    max_age_days,
+                    None,  # 差分が無い日には更新行が出ないため鮮度チェック対象外
                     prefix="cloudflare_waf/",
                     table="cloudflare_waf_history",
                     ts_column="fetched_date",
