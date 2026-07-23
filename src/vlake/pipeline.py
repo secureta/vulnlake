@@ -888,7 +888,9 @@ _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parqu
 # ため日次では動かない。daily 前提の max_age_days=3 では正常な数日の空白が
 # 誤検知になる (publish の false positive)。CWE ほど頻度は低くないので完全除外
 # ではなく、より緩い窓で本当の長期停止だけを捕まえる。
-_EXPLOITDB_MAX_AGE_DAYS = 14
+# 14 日窓では 15 日の通常公開ギャップで誤検知が発生した (publish 実績) ため、
+# 3 週間まで広げて数週間以上の本当の停止だけを stale とする。
+_EXPLOITDB_MAX_AGE_DAYS = 21
 _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _CLOUDFLARE_WAF_UPDATE_KEY_DATE = re.compile(
     r"cloudflare-waf-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
