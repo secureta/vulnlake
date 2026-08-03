@@ -1076,7 +1076,10 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                 "kev": _verify_history(
                     storage,
                     lake,
-                    max_age_days,
+                    # 差分が無い日には更新行が出ないため鮮度チェック対象外。
+                    # CISA の追加は週末・祝日を挟んで 4 日以上空くのが常態
+                    # (2025 年以降だけで 66 回) で、fetched_date は追随しない
+                    None,
                     prefix="kev/",
                     table="kev_history",
                     ts_column="fetched_date",
