@@ -213,6 +213,30 @@ def test_verify_covers_kev(cfg, monkeypatch):
     assert rep["max_date"] == date(2026, 7, 12)
 
 
+def test_verify_kev_no_new_records_is_not_stale(cfg, monkeypatch):
+    """publish 2026-08-03 の回帰: kev は差分がある日しか更新行が出ないため、
+    CISA の追加が数日空く (週末・祝日を挟む) だけで max(fetched_date) が止まる。
+    cloudflare_waf と同様に鮮度チェック対象外とし、stale にしてはいけない。
+    """
+    _patch_download(monkeypatch, _initial_records())
+    pipeline.update_kev(cfg, today=date(2026, 7, 30))
+    assert (
+        pipeline.update_kev(cfg, today=date(2026, 8, 3)) == "no-new-records 2026-08-03"
+    )
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 3)
+
+    monkeypatch.setattr(pipeline, "date", FrozenDate)
+
+    report = pipeline.verify(cfg, max_age_days=3)
+
+    assert report["stale"] is False
+    assert report["datasets"]["kev"]["stale"] is False
+
+
 def test_verify_detects_kev_stray_file(cfg, monkeypatch):
     _patch_download(monkeypatch, _initial_records())
     pipeline.update_kev(cfg, today=date(2026, 7, 12))
