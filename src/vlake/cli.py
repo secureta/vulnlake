@@ -107,7 +107,11 @@ def backfill(dataset: str, source: Path | None) -> None:
 def rebuild_catalog() -> None:
     """ストレージ上の Parquet 一覧からカタログを再構築する。"""
     cfg = Config.from_env()
-    click.echo(pipeline.rebuild_catalog(cfg))
+    result = pipeline.rebuild_catalog(cfg)
+    click.echo(result)
+    if result.startswith("refused"):
+        # 空バケット (設定ミス等) でカタログ未再構築のまま緑になるのを防ぐ
+        raise SystemExit(1)
 
 
 @main.command()
