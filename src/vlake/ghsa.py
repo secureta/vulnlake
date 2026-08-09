@@ -91,14 +91,25 @@ def _score_from_vector(vector: str) -> tuple[float | None, str | None]:
 
 
 def _best_cvss(severity: list) -> tuple[str | None, float | None, str | None]:
-    """severity 配列から CVSS_V4 > CVSS_V3 の優先で (vector, score, version) を採択。"""
+    """severity 配列から CVSS_V4 > CVSS_V3 の優先で (vector, score, version) を採択。
+
+    スコアを算出できたエントリを優先する。上位版に壊れたベクタがあっても
+    下位版の正常なスコアを握りつぶさないため、算出できなければ次の候補へ進む。
+    どれも算出できない場合は、優先順で最初に見つかったベクタ文字列だけを
+    (score/version なしで) 返す — 上流の異常値を観測できるようにするため。
+    """
+    fallback: tuple[str | None, float | None, str | None] | None = None
     for kind in _CVSS_TYPES:
         for entry in severity:
             vector = entry.get("score")
-            if entry.get("type") == kind and vector and isinstance(vector, str):
-                score, version = _score_from_vector(vector)
+            if entry.get("type") != kind or not vector or not isinstance(vector, str):
+                continue
+            score, version = _score_from_vector(vector)
+            if score is not None:
                 return vector, score, version
-    return None, None, None
+            if fallback is None:
+                fallback = (vector, None, None)
+    return fallback if fallback is not None else (None, None, None)
 
 
 def _affected_entries(affected: list) -> list[dict]:

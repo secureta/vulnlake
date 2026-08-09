@@ -69,6 +69,39 @@ def test_parse_record_broken_vector_keeps_vector_string():
     assert row["cvss_vector"] == "CVSS:3.1/broken"
 
 
+def test_parse_record_broken_v4_falls_back_to_valid_v3():
+    """上位版の壊れたベクタが下位版の正常なスコアを握りつぶさないこと。"""
+    rec = make_ghsa_record(
+        "GHSA-aaaa-bbbb-cccc",
+        severity=[
+            {"type": "CVSS_V4", "score": "CVSS:4.0/BROKEN"},
+            {
+                "type": "CVSS_V3",
+                "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            },
+        ],
+    )
+    row = ghsa.parse_record(json.dumps(rec).encode())
+    assert row["cvss"] == 10.0
+    assert row["cvss_version"] == "3.1"
+    assert row["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+
+
+def test_parse_record_all_vectors_broken_keeps_highest_priority_vector():
+    """どれも算出できない場合は優先順で最初のベクタだけを残すこと。"""
+    rec = make_ghsa_record(
+        "GHSA-aaaa-bbbb-cccc",
+        severity=[
+            {"type": "CVSS_V3", "score": "CVSS:3.1/broken"},
+            {"type": "CVSS_V4", "score": "CVSS:4.0/broken"},
+        ],
+    )
+    row = ghsa.parse_record(json.dumps(rec).encode())
+    assert row["cvss"] is None
+    assert row["cvss_version"] is None
+    assert row["cvss_vector"] == "CVSS:4.0/broken"  # CVSS_V4 が優先
+
+
 def test_parse_record_non_string_score_is_skipped():
     # score が文字列でないエントリは採択しない (vector も格納しない)
     rec = make_ghsa_record(
