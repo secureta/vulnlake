@@ -240,9 +240,10 @@ authoring time — the `epss` table is the source of truth for current scores.
 ### `cwe` / `cwe_history` — CWE catalog
 
 Versioned snapshots of the CWE catalog (weaknesses, categories and views, told
-apart by `entry_type`). The `cwe` view returns the snapshot with the latest
-`release_date`; join it against the `cwe` array columns of `cve` / `ghsa` /
-`nuclei`. Deprecated entries remain with `status = 'Deprecated'`.
+apart by `entry_type`). The `cwe` view returns exactly one snapshot: the latest
+`release_date`, breaking ties on the numerically-greatest `cwe_version` (so
+`4.20` wins over `4.9`). Join it against the `cwe` array columns of `cve` /
+`ghsa` / `nuclei`. Deprecated entries remain with `status = 'Deprecated'`.
 
 | Column | Type | Description |
 |---|---|---|
@@ -255,7 +256,7 @@ apart by `entry_type`). The `cwe` view returns the snapshot with the latest
 | `likelihood_of_exploit` | VARCHAR | Likelihood of exploit |
 | `relations` | STRUCT(nature, target_id)[] | Relationships to other CWEs |
 | `cwe_version` | VARCHAR | CWE catalog version |
-| `release_date` | DATE | Snapshot release date (also the view's latest-row key) |
+| `release_date` | DATE | Snapshot release date (the view's snapshot key; ties broken by `cwe_version`) |
 
 ### `attack` / `attack_history` — MITRE ATT&CK
 

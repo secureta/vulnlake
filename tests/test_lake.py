@@ -743,3 +743,28 @@ def test_cwe_view_returns_latest_snapshot(tmp_path):
         assert got == [("CWE-79", "4.20")]
     finally:
         lake.close()
+
+
+def test_cwe_view_breaks_release_date_tie_by_numeric_version(tmp_path):
+    """同一 release_date に2バージョンが並んでも1断面に絞られること。
+
+    release_date は DATE 粒度なので同日リリースがあり得る。絞れないと
+    全 cwe_id が二重化し、cwe_attack_patterns 等の下流結合がファンアウトする。
+    タイブレークは数値順 ('4.9' < '4.20')。
+    """
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cwe_history "  # noqa: S608
+            "(cwe_id, entry_type, cwe_version, release_date) VALUES "
+            "('CWE-79', 'weakness', '4.9', DATE '2026-04-30'), "
+            "('CWE-89', 'weakness', '4.9', DATE '2026-04-30'), "
+            "('CWE-79', 'weakness', '4.20', DATE '2026-04-30'), "
+            "('CWE-89', 'weakness', '4.20', DATE '2026-04-30')"
+        )
+        lake.refresh_cwe_view()
+        got = lake.query("SELECT cwe_id, cwe_version FROM lake.cwe ORDER BY cwe_id")
+        assert got == [("CWE-79", "4.20"), ("CWE-89", "4.20")]
+    finally:
+        lake.close()
