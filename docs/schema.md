@@ -125,10 +125,13 @@ possible values.
 
 ### `cve_ssvc_candidates` — CVE-based SSVC decision candidates
 
-Joins `cve_ssvc` to `ssvc_decision`. Recorded CVE SSVC values constrain the
+Left-joins `cve_ssvc` to `ssvc_decision`. Recorded CVE SSVC values constrain the
 join. Missing recorded parameters expand to every value from `ssvc_decision`,
 so CVEs with partial SSVC data return every possible decision candidate. CVEs
-without SSVC data return zero rows.
+without SSVC data return zero rows. If a recorded value is not part of the
+`ssvc_decision` vocabulary (an unexpected upstream token), the CVE still returns
+one row with the candidate and `computed_decision` columns set to NULL, so it is
+not silently dropped.
 
 | Column | Type | Description |
 |---|---|---|
@@ -147,7 +150,7 @@ without SSVC data return zero rows.
 | `recorded_technical_impact` | VARCHAR | Technical Impact value recorded in CVE JSON, or NULL if missing |
 | `recorded_mission_impact` | VARCHAR | Mission and Well-Being Impact value recorded in CVE JSON, or NULL if missing |
 | `recorded_decision` | VARCHAR | Decision recorded in CVE JSON if present |
-| `computed_decision` | VARCHAR | Decision computed from `ssvc_decision` |
+| `computed_decision` | VARCHAR | Decision computed from `ssvc_decision`; NULL when no decision row matches the recorded values |
 | `decision_matches` | BOOLEAN | Whether `recorded_decision` equals `computed_decision`; NULL when no recorded decision exists |
 | `decision_label` | VARCHAR | Display label for `computed_decision` |
 | `decision_rank` | INTEGER | Sort key from lowest to highest urgency |

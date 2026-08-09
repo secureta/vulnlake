@@ -338,6 +338,46 @@ def test_cve_ssvc_candidates_expands_missing_parameters_and_compares_decision(
         lake.close()
 
 
+def test_cve_ssvc_candidates_keeps_cve_with_unmapped_recorded_value(tmp_path):
+    """decision table に無い記録値でも CVE を落とさないこと。
+
+    上流 CISA が未知のトークンを出したとき、INNER JOIN では該当 CVE が
+    候補 view から丸ごと消えてサイレントな欠落になる。computed_decision が
+    NULL の行を1つ残し、recorded_* から異常を追えるようにする。
+    """
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated, raw) VALUES (?, TIMESTAMP '2026-07-10 00:00:00', ?)",
+            [
+                "CVE-2024-0003",
+                _cve_raw_with_ssvc(
+                    "CVE-2024-0003",
+                    exploitation="public_poc",  # 語彙外 (正: "public poc")
+                    automatable="no",
+                    technical_impact="total",
+                    mission_impact="high",
+                    decision="attend",
+                ),
+            ],
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_cve_ssvc_view()
+        lake.refresh_ssvc_decision_view()
+        lake.refresh_cve_ssvc_candidates_view()
+        rows = lake.query(
+            "SELECT recorded_exploitation, computed_decision, decision_label, "
+            "decision_rank, decision_matches, recorded_decision "
+            "FROM lake.cve_ssvc_candidates WHERE cve = 'CVE-2024-0003'"
+        )
+        assert rows == [("public_poc", None, None, None, None, "attend")]
+    finally:
+        lake.close()
+
+
 def test_cve_ssvc_candidates_returns_zero_rows_without_ssvc(tmp_path):
     lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
     try:

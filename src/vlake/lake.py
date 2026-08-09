@@ -420,7 +420,14 @@ class Lake:
         )
 
     def refresh_cve_ssvc_candidates_view(self) -> None:
-        """CVE 記録値を起点に不足 SSVC パラメータを展開した decision 候補 view。"""
+        """CVE 記録値を起点に不足 SSVC パラメータを展開した decision 候補 view。
+
+        LEFT JOIN なのは、記録値が decision table の語彙に無い場合でも CVE を
+        落とさないため。上流 CISA が未知のトークン (綴り違い・新パラメータ値) を
+        出すと INNER JOIN では該当 CVE が候補 view から丸ごと消え、
+        サイレントなデータ欠落になる。この場合は computed_decision 等が NULL の
+        行が1つ残り、recorded_* から異常を追える。
+        """
         self.con.execute(
             # ALIAS はクラス定数の固定識別子で外部入力は入らない
             f"""CREATE OR REPLACE VIEW {self.ALIAS}.cve_ssvc_candidates AS
@@ -449,7 +456,7 @@ class Lake:
                 d.decision_rank,
                 s.ssvc_raw
             FROM {self.ALIAS}.cve_ssvc AS s
-            JOIN {self.ALIAS}.ssvc_decision AS d
+            LEFT JOIN {self.ALIAS}.ssvc_decision AS d
               ON (s.ssvc_version IS NULL OR s.ssvc_version = d.ssvc_version)
              AND (s.ssvc_role IS NULL OR s.ssvc_role = d.ssvc_role)
              AND (s.exploitation IS NULL OR s.exploitation = d.exploitation)
