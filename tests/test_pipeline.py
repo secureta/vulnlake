@@ -227,8 +227,15 @@ def test_years_from_keys():
     assert pipeline._years_from_keys(keys) == {2021, 2026}
 
 
-def test_backfill_skips_closed_year_with_daily_files(cfg, monkeypatch, tmp_path):
-    """日次で登録済みの確定年は skip され、年ファイルによる二重登録が起きないこと。"""
+def test_backfill_fills_missing_days_in_closed_year_with_daily_files(
+    cfg, monkeypatch, tmp_path
+):
+    """日次で登録済みの確定年は、年集約せずに未登録の日だけを日次で埋めること。
+
+    年ファイルを作ると登録済みの日と二重になるため集約はしない。ただし年ごと skip も
+    してはいけない (日次を年途中から回し始めた年を翌年 backfill すると、それ以前の
+    月が永久に取り込まれなくなるため)。
+    """
     raw = make_epss_csv_gz(
         date(2021, 4, 14),
         [("CVE-2020-5902", 0.65117)],
@@ -240,6 +247,12 @@ def test_backfill_skips_closed_year_with_daily_files(cfg, monkeypatch, tmp_path)
 
     src = tmp_path / "mirror"
     (src / "2021").mkdir(parents=True)
+    # 登録済みの 04-14 より前 (01-05) と後 (04-15) の両方に穴がある状態
+    (src / "2021" / "epss_scores-2021-01-05.csv.gz").write_bytes(
+        make_epss_csv_gz(
+            date(2021, 1, 5), [("CVE-2020-5902", 0.60, 0.98)], model_version="v1"
+        )
+    )
     (src / "2021" / "epss_scores-2021-04-14.csv.gz").write_bytes(raw)
     (src / "2021" / "epss_scores-2021-04-15.csv.gz").write_bytes(
         make_epss_csv_gz(
@@ -248,9 +261,19 @@ def test_backfill_skips_closed_year_with_daily_files(cfg, monkeypatch, tmp_path)
     )
 
     msg = pipeline.backfill_epss(cfg, src, today=date(2026, 7, 11))
-    assert msg == "backfilled 0 year files, 0 daily files (skipped 1 years, 0 daily)"
+    assert msg == "backfilled 0 year files, 2 daily files (skipped 0 years, 1 daily)"
+    # 年集約はしない (登録済みの 04-14 と二重になるため)
     assert not (cfg.local_dir / "epss" / "year=2021" / "epss-2021.parquet").exists()
+    # 未登録だった日は前後どちらも日次ファイルとして埋まる
+    assert (cfg.local_dir / "epss" / "year=2021" / "epss-2021-01-05.parquet").exists()
+    assert (cfg.local_dir / "epss" / "year=2021" / "epss-2021-04-15.parquet").exists()
 
     report = pipeline.verify(cfg)
     assert report["ok"] is True
-    assert report["datasets"]["epss"]["row_count"] == 1
+    assert report["datasets"]["epss"]["row_count"] == 3
+    assert report["datasets"]["epss"]["min_date"] == date(2021, 1, 5)
+
+    # 冪等: 再実行では何も増えない
+    msg = pipeline.backfill_epss(cfg, src, today=date(2026, 7, 11))
+    assert msg == "backfilled 0 year files, 0 daily files (skipped 0 years, 3 daily)"
+    assert pipeline.verify(cfg)["datasets"]["epss"]["row_count"] == 3

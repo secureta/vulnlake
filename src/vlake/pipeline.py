@@ -186,7 +186,9 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
     """empiricalsec/epss_scores の clone (等) から全履歴を取り込む。
 
     確定した過去年 (today の年より前) は年1ファイル (cve, date ソート) に集約し、
-    進行中の年は日次のまま登録する。today はテスト用の注入点 (省略時は実日付)。
+    進行中の年は日次のまま登録する。確定年でも日次ファイルが既に登録済みの場合は
+    年集約すると同じ日が二重登録になるため集約せず、未登録の日だけを日次で追加する。
+    today はテスト用の注入点 (省略時は実日付)。
     """
     storage = make_storage(cfg)
     current_year = (today or date.today()).year
@@ -208,31 +210,30 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
             registered = lake.registered_paths()
             for year in sorted(by_year):
                 days = by_year[year]
-                if year < current_year:
-                    if storage.url(epss.year_key_for(year)) in registered:
-                        skipped_years += 1
-                        continue
-                    if _daily_registered(registered, year):
-                        print(
-                            f"  {year}: 日次ファイルが登録済みのため skip (年集約は行わない)"
-                        )
-                        skipped_years += 1
-                        continue
+                closed = year < current_year
+                if closed and storage.url(epss.year_key_for(year)) in registered:
+                    skipped_years += 1
+                    continue
+                if closed and not _daily_registered(registered, year):
                     _ingest_year(storage, lake, year, days, workdir)
                     added_years += 1
                     print(f"  {year}: 年ファイル登録 ({len(days)}日分)")
-                else:
-                    for d, path in days:
-                        ok, _ = _ingest_day(
-                            storage,
-                            lake,
-                            path.read_bytes(),
-                            fallback=d,
-                            workdir=workdir,
-                        )
-                        added_days += ok
-                        skipped_days += not ok
-                    print(f"  {year}: 日次 {len(days)}日分 (新規 {added_days})")
+                    continue
+                # 進行中の年、および日次登録済みの確定年。後者を年集約すると登録済みの
+                # 日と二重になるため、日次のまま未登録の日だけを埋める (_ingest_day が冪等)
+                added = 0
+                for d, path in days:
+                    ok, _ = _ingest_day(
+                        storage,
+                        lake,
+                        path.read_bytes(),
+                        fallback=d,
+                        workdir=workdir,
+                    )
+                    added += ok
+                    added_days += ok
+                    skipped_days += not ok
+                print(f"  {year}: 日次 {len(days)}日分 (新規 {added})")
             _publish_catalog(storage, lake, catalog)
         finally:
             lake.close()
