@@ -1062,7 +1062,10 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                 "nuclei": _verify_history(
                     storage,
                     lake,
-                    max_age_days,
+                    # digest が変わらない日には更新行が出ないため鮮度チェック対象外。
+                    # kev / cloudflare_waf と同じく fetched_date は「上流の更新時刻」
+                    # ではなく「差分を検出した日」で、上流が静かなら進まない
+                    None,
                     prefix="nuclei/",
                     table="nuclei_history",
                     ts_column="fetched_date",

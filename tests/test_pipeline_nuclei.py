@@ -243,6 +243,33 @@ def test_verify_covers_nuclei(cfg, tmp_path, monkeypatch):
     assert rep["max_date"] == date(2026, 7, 12)
 
 
+def test_verify_nuclei_no_new_records_is_not_stale(cfg, tmp_path, monkeypatch):
+    """nuclei は digest が変わる日しか更新行が出ないため鮮度チェック対象外。
+
+    fetched_date は「上流の更新時刻」ではなく「差分を検出した日」なので、
+    上流が静かなだけで max(fetched_date) が止まる。kev / cloudflare_waf と
+    同じ理由で stale にしてはいけない。
+    """
+    _patch_download(monkeypatch, tmp_path, _initial_files())
+    pipeline.update_nuclei(cfg, today=date(2026, 7, 30))
+    assert (
+        pipeline.update_nuclei(cfg, today=date(2026, 8, 3))
+        == "no-new-records 2026-08-03"
+    )
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 3)
+
+    monkeypatch.setattr(pipeline, "date", FrozenDate)
+
+    report = pipeline.verify(cfg, max_age_days=3)
+
+    assert report["stale"] is False
+    assert report["datasets"]["nuclei"]["stale"] is False
+
+
 def test_verify_detects_nuclei_stray_file(cfg, tmp_path, monkeypatch):
     _patch_download(monkeypatch, tmp_path, _initial_files())
     pipeline.update_nuclei(cfg, today=date(2026, 7, 12))
