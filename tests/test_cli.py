@@ -42,6 +42,29 @@ def test_verify_exit_1_when_stale(monkeypatch, tmp_path):
     assert "'stale': True" in result.output
 
 
+def test_rebuild_catalog_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert CliRunner().invoke(main, ["update", "epss"]).exit_code == 0
+    (tmp_path / "vlake.ducklake").unlink()
+
+    result = CliRunner().invoke(main, ["rebuild-catalog"])
+    assert result.exit_code == 0, result.output
+    assert "rebuilt catalog with 1 files" in result.output
+
+
+def test_rebuild_catalog_refused_exits_nonzero(monkeypatch, tmp_path):
+    # 空ストレージでは再構築されない。update と同様、緑で終わらせない
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+
+    result = CliRunner().invoke(main, ["rebuild-catalog"])
+    assert result.exit_code == 1
+    assert "refused: no parquet files in storage" in result.output
+
+
 def test_update_with_date_option(monkeypatch, tmp_path):
     monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
