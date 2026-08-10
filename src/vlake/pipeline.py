@@ -880,9 +880,6 @@ def rebuild_catalog(cfg: Config) -> str:
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
-_EXPLOITDB_UPDATE_KEY_DATE = re.compile(
-    r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
-)
 _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _CLOUDFLARE_WAF_UPDATE_KEY_DATE = re.compile(
@@ -893,9 +890,12 @@ _ATTACK_RELATIONSHIP_UPDATE_KEY_DATE = re.compile(
     r"attack-relationships-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
 _CAPEC_UPDATE_KEY_DATE = re.compile(r"capec-(\d{4}-\d{2}-\d{2})\.parquet$")
-# スナップショット型データセットではキー日付が取得日で、行の modified/release_date
-# とは追随関係にないため、_verify_history の日付追随検査を明示的に無効化する。
-_SNAPSHOT_KEY_DATE = re.compile(r"$^")
+# _verify_history の「max(ts) が日次キーに追随」検査を無効化するための、
+# 決してマッチしない正規表現。以下はいずれもキー日付 (取得日) と ts_column が
+# 追随関係にないため、この検査を通しても誤検知にしかならない:
+#   - スナップショット型 (attack/capec): キーは取得日、行は上流の modified
+#   - exploitdb: OffSec の公開が不定期で、date_updated は取得日から任意に遅れる
+_NO_DATE_FOLLOW_CHECK = re.compile(r"$^")
 # cwe のキーはバージョン断面 (cwe/version=<ver>/) で日付を含まないため常に不一致。
 # _verify_history の「max(ts) が日次キーに追随」検査は自然にスキップされる
 _CWE_UPDATE_KEY_DATE = re.compile(r"cwe-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
@@ -1054,7 +1054,10 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     prefix="exploitdb/",
                     table="exploitdb_history",
                     ts_column="date_updated",
-                    update_key_re=_EXPLOITDB_UPDATE_KEY_DATE,
+                    # 鮮度チェックと同じ理由で日付追随検査も無効化する。date_updated は
+                    # 上流のイベント日で、取得日 (キー日付) から任意に遅れて現れるため、
+                    # 1日の許容では整合が取れていても ok=False になる
+                    update_key_re=_NO_DATE_FOLLOW_CHECK,
                 ),
                 "nuclei": _verify_history(
                     storage,
@@ -1102,7 +1105,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     prefix="attack/updates/",
                     table="attack_history",
                     ts_column="modified",
-                    update_key_re=_SNAPSHOT_KEY_DATE,
+                    update_key_re=_NO_DATE_FOLLOW_CHECK,
                 ),
                 "attack_relationship": _verify_history(
                     storage,
@@ -1111,7 +1114,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     prefix="attack/relationships/",
                     table="attack_relationship_history",
                     ts_column="modified",
-                    update_key_re=_SNAPSHOT_KEY_DATE,
+                    update_key_re=_NO_DATE_FOLLOW_CHECK,
                 ),
                 "capec": _verify_history(
                     storage,
@@ -1120,7 +1123,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     prefix="capec/",
                     table="capec_history",
                     ts_column="modified",
-                    update_key_re=_SNAPSHOT_KEY_DATE,
+                    update_key_re=_NO_DATE_FOLLOW_CHECK,
                 ),
             }
         finally:
