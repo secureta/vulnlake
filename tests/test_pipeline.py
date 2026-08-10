@@ -160,8 +160,36 @@ def test_verify_without_catalog(cfg, monkeypatch):
     assert report["error"] == "catalog not found"
 
 
+def test_verify_does_not_detect_same_key_content_swap(cfg, monkeypatch):
+    """既知の限界: 同一キーのまま中身を差し替えられても検出できないこと。
+
+    パス集合も統計もカタログ側の値しか見ないため、Parquet 本体の書き換えは
+    素通りする。verify の docstring に明記した限界をテストでも固定しておく
+    (実体照合を入れる変更をしたらこのテストが落ちて気づける)。
+    """
+    raw = make_epss_csv_gz(
+        date(2026, 7, 10),
+        [("CVE-1999-0001", 0.1, 0.5), ("CVE-1999-0002", 0.2, 0.6)],
+    )
+    monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
+    assert pipeline.update_epss(cfg) == "published 2026-07-10"
+    assert pipeline.verify(cfg)["datasets"]["epss"]["row_count"] == 2
+
+    # カタログには触れず、同じキーの Parquet だけを 1 行に書き換える
+    target = cfg.local_dir / "epss" / "year=2026" / "epss-2026-07-10.parquet"
+    table, _, _ = epss.parse(
+        make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.9, 0.9)]),
+        fallback_date=date(2026, 7, 10),
+    )
+    epss.write_parquet(table, target)
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is True  # 検出できない
+    assert report["datasets"]["epss"]["row_count"] == 2  # カタログ側の古い件数
+
+
 def test_verify_detects_untracked_file(cfg, monkeypatch):
-    """件数一致だけでは見逃す差し替え/混入をパス集合比較で検出できること。"""
+    """キー集合の変化 (混入・欠落・キーが変わる差し替え) を検出できること。"""
     raw = make_epss_csv_gz(date(2026, 7, 10), [("CVE-1999-0001", 0.1, 0.5)])
     monkeypatch.setattr(epss, "fetch", lambda target=None: raw)
     assert pipeline.update_epss(cfg) == "published 2026-07-10"
