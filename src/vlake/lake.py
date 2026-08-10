@@ -665,15 +665,29 @@ class Lake:
         )
 
     def refresh_cwe_view(self) -> None:
-        """release_date 最大のバージョン断面 (全エントリ) を返す view。
+        """最新バージョン断面 (全エントリ) を返す view。
 
-        cwe_version の文字列比較は '4.9' > '4.20' となるため使わない。
+        release_date は DATE 粒度なので、同日リリースの2バージョンが並ぶと
+        release_date だけでは1断面に絞れず全 cwe_id が二重化する。
+        タイブレークに cwe_version を使うが、文字列比較では '4.9' > '4.20' に
+        なってしまうため、'.' 区切りを整数リストにして数値順で比較する。
         """
         self.con.execute(
             # ALIAS はクラス定数の固定識別子で外部入力は入らない
-            f"CREATE OR REPLACE VIEW {self.ALIAS}.cwe AS "  # noqa: S608
-            f"SELECT * FROM {self.ALIAS}.cwe_history WHERE release_date = "
-            f"(SELECT max(release_date) FROM {self.ALIAS}.cwe_history)"
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.cwe AS
+            WITH latest AS (
+                SELECT cwe_version, release_date
+                FROM {self.ALIAS}.cwe_history
+                GROUP BY cwe_version, release_date
+                ORDER BY release_date DESC, list_transform(
+                    string_split(cwe_version, '.'), x -> try_cast(x AS INTEGER)
+                ) DESC
+                LIMIT 1
+            )
+            SELECT h.* FROM {self.ALIAS}.cwe_history AS h
+            JOIN latest AS l
+              ON h.cwe_version = l.cwe_version
+             AND h.release_date = l.release_date"""  # noqa: S608
         )
 
     def refresh_attack_view(self) -> None:
