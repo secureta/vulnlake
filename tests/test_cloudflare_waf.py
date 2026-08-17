@@ -1,6 +1,8 @@
 from datetime import date
 
+import httpx
 import pyarrow.parquet as pq
+import pytest
 
 from vlake import cloudflare_waf
 
@@ -181,3 +183,71 @@ def test_rows_to_table_key_and_parquet_roundtrip(tmp_path):
     out = tmp_path / "rows.parquet"
     cloudflare_waf.write_parquet(table, out)
     assert pq.read_table(out).schema == cloudflare_waf.SCHEMA
+
+
+def _no_sleep(monkeypatch):
+    monkeypatch.setattr(cloudflare_waf.time, "sleep", lambda s: None)
+
+
+def test_get_with_retry_recovers_from_transient_503(monkeypatch):
+    """publish 2026-08-17 の回帰: raw.githubusercontent.com の単発 503 で
+    ステップ全体を落とさず、バックオフ後の再試行で回復する。
+    """
+    _no_sleep(monkeypatch)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        if len(calls) < 3:
+            return httpx.Response(503, text="first byte timeout")
+        return httpx.Response(200, text="ok")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        resp = cloudflare_waf._get_with_retry(client, "https://example.test/x.mdx")
+    assert resp.text == "ok"
+    assert len(calls) == 3
+
+
+def test_get_with_retry_gives_up_after_persistent_503(monkeypatch):
+    _no_sleep(monkeypatch)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        return httpx.Response(503, text="first byte timeout")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            cloudflare_waf._get_with_retry(client, "https://example.test/x.mdx")
+    assert len(calls) == cloudflare_waf._RETRY_ATTEMPTS
+
+
+def test_get_with_retry_does_not_retry_permanent_404(monkeypatch):
+    """404 は上流のパス消滅 (恒久エラー) なので再試行せず即座に失敗させる。"""
+    _no_sleep(monkeypatch)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        return httpx.Response(404, text="not found")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            cloudflare_waf._get_with_retry(client, "https://example.test/gone.mdx")
+    assert len(calls) == 1
+
+
+def test_get_with_retry_recovers_from_connect_error(monkeypatch):
+    _no_sleep(monkeypatch)
+    calls = []
+
+    def handler(request):
+        calls.append(request.url)
+        if len(calls) == 1:
+            raise httpx.ConnectError("connection reset")
+        return httpx.Response(200, text="ok")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        resp = cloudflare_waf._get_with_retry(client, "https://example.test/x.mdx")
+    assert resp.text == "ok"
+    assert len(calls) == 2

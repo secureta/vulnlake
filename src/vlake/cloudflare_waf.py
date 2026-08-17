@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 from datetime import date
 from pathlib import Path
 
@@ -245,13 +246,37 @@ def _write_source(dest_dir: Path, source_path: str, raw: bytes) -> Path:
     return out
 
 
+# MDX ファイルごとに 1 リクエストを逐次発行するため、単発の一時障害 (503 等) で
+# ステップ全体が落ちやすい (publish 2026-08-17 の実績)。恒久エラー (404 等の 4xx)
+# は即座に失敗させ、一時エラーだけを指数バックオフで再試行する
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_RETRY_ATTEMPTS = 3
+_RETRY_WAIT_SECONDS = 2.0
+
+
+def _get_with_retry(client: httpx.Client, url: str) -> httpx.Response:
+    """一時エラー (接続断・タイムアウト・429/5xx) を指数バックオフで再試行する。"""
+    for attempt in range(_RETRY_ATTEMPTS - 1):
+        try:
+            resp = client.get(url)
+        except httpx.TransportError:
+            pass
+        else:
+            if resp.status_code not in _RETRY_STATUSES:
+                resp.raise_for_status()
+                return resp
+        time.sleep(_RETRY_WAIT_SECONDS * (2**attempt))
+    resp = client.get(url)
+    resp.raise_for_status()
+    return resp
+
+
 def download(dest_dir: Path) -> list[Path]:
     """Cloudflare Docs GitHub リポジトリから WAF ChangeLog MDX を取得する。"""
     dest_dir.mkdir(parents=True, exist_ok=True)
     paths: list[str] = list(_HISTORICAL_PATHS)
     with httpx.Client(follow_redirects=True, timeout=120) as client:
-        resp = client.get(_API_DIR_URL)
-        resp.raise_for_status()
+        resp = _get_with_retry(client, _API_DIR_URL)
         listing = json.loads(resp.text)
         if not isinstance(listing, list):
             raise ValueError("Cloudflare Docs API response is not a directory listing")
@@ -262,8 +287,7 @@ def download(dest_dir: Path) -> list[Path]:
                     paths.append(path)
         written = []
         for source_path in sorted(set(paths)):
-            raw = client.get(_RAW_BASE.format(source_path))
-            raw.raise_for_status()
+            raw = _get_with_retry(client, _RAW_BASE.format(source_path))
             written.append(_write_source(dest_dir, source_path, raw.content))
     return written
 
