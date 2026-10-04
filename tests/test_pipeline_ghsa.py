@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import duckdb
 import pytest
@@ -223,6 +223,49 @@ def test_verify_covers_ghsa(cfg, tmp_path):
     # 他データセットは空でも ok
     assert report["datasets"]["epss"]["ok"] is True
     assert report["datasets"]["cve"]["ok"] is True
+
+
+@pytest.mark.parametrize("lag_days", [2, 3, 4])
+@pytest.mark.parametrize("max_age_days", [None, 3])
+def test_verify_ghsa_modified_can_lag_fetch_date(
+    cfg, tmp_path, monkeypatch, lag_days, max_age_days
+):
+    run_date = date(2026, 10, 4)
+
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return run_date
+
+    monkeypatch.setattr(pipeline, "date", FixedDate)
+    tp = tmp_path / "initial.tar.gz"
+    make_ghsa_tarball(tp, _records())
+    pipeline.backfill_ghsa(cfg, source_tar=tp)
+
+    modified_date = run_date - timedelta(days=lag_days)
+    updated = [
+        make_ghsa_record(
+            "GHSA-jfh8-c2jp-5v3q",
+            published="2021-12-10T00:40:56Z",
+            modified=f"{modified_date.isoformat()}T12:00:00Z",
+        )
+    ]
+    _patch_fetch(monkeypatch, tmp_path, updated, "delayed")
+    assert (
+        pipeline.update_ghsa(cfg, today=run_date)
+        == "published 2026-10-04 (1 records, 0 bad)"
+    )
+
+    report = pipeline.verify(cfg, max_age_days=max_age_days)
+    rep = report["datasets"]["ghsa"]
+    assert rep["files_in_storage"] == rep["files_in_catalog"] == 3
+    assert rep["row_count"] == 4
+    assert rep["max_date"] == modified_date
+    assert rep["ok"] is True
+    assert report["ok"] is True
+    expected_stale = max_age_days is not None and lag_days > max_age_days
+    assert rep["stale"] is expected_stale
+    assert report["stale"] is expected_stale
 
 
 def test_verify_detects_ghsa_stray_file(cfg, tmp_path):

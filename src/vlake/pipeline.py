@@ -879,7 +879,6 @@ def rebuild_catalog(cfg: Config) -> str:
 
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
-_GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _CLOUDFLARE_WAF_UPDATE_KEY_DATE = re.compile(
@@ -1048,7 +1047,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     prefix="ghsa/",
                     table="ghsa_history",
                     ts_column="modified",
-                    update_key_re=_GHSA_UPDATE_KEY_DATE,
+                    update_key_re=_NO_DATE_FOLLOW_CHECK,
                 ),
                 "exploitdb": _verify_history(
                     storage,
