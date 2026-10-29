@@ -816,6 +816,8 @@ def update_cwe(cfg: Config) -> str:
             return "not-modified"
         raw_zip, last_modified = fetched
         version, _, rows = cwe.parse_catalog(raw_zip)
+        if not rows:
+            raise ValueError("空の CWE カタログは公開できません")
         key = cwe.key_for_version(version)
         lake, catalog = _open_lake(storage, workdir)
         try:

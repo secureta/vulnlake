@@ -251,7 +251,7 @@ apart by `entry_type`). The `cwe` view returns exactly one snapshot: the latest
 | Column | Type | Description |
 |---|---|---|
 | `cwe_id` | VARCHAR | CWE ID (e.g. `CWE-79`) |
-| `entry_type` | VARCHAR | `weakness` / `category` / `view` |
+| `entry_type` | VARCHAR | `weakness` / `category` / `view`; CWE schema 8 Grouping entries are normalized to `category` for compatibility |
 | `name` | VARCHAR | Entry name |
 | `abstraction` | VARCHAR | Abstraction level (e.g. `Base`, `Class`) |
 | `status` | VARCHAR | Status (e.g. `Stable`, `Deprecated`) |

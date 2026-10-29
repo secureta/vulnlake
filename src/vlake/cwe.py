@@ -10,6 +10,7 @@ MITRE の公認・認証を受けたものではない。
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -62,7 +63,7 @@ LICENSE_INFO = {
 ZIP_URL = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
 LAST_MODIFIED_KEY = "cwe/last-modified.txt"
 
-_NS = "{http://cwe.mitre.org/cwe-7}"
+_NAMESPACES = {"http://cwe.mitre.org/cwe-7", "http://cwe.mitre.org/cwe-8"}
 
 
 def fetch(prev_last_modified: str | None = None) -> tuple[bytes, str | None] | None:
@@ -82,16 +83,18 @@ def fetch(prev_last_modified: str | None = None) -> tuple[bytes, str | None] | N
     return resp.content, resp.headers.get("Last-Modified")
 
 
-def _text(elem, tag: str) -> str | None:
+def _text(elem, tag: str, ns: str) -> str | None:
     """直下の tag 要素の全テキスト (xhtml 含む) を空白正規化して返す。無ければ None。"""
-    child = elem.find(f"{_NS}{tag}")
+    child = elem.find(f"{ns}{tag}")
     if child is None:
         return None
     text = " ".join("".join(child.itertext()).split())
     return text or None
 
 
-def _relations(container, member_tag: str, nature: str | None = None) -> list[dict]:
+def _relations(
+    container, member_tag: str, ns: str, nature: str | None = None
+) -> list[dict]:
     """関係要素を {nature, target_id} のリストにする。
 
     同一 (Nature, CWE_ID) が View_ID 違いで重複するため出現順を保って畳む。
@@ -100,7 +103,7 @@ def _relations(container, member_tag: str, nature: str | None = None) -> list[di
     if container is None:
         return []
     rels: list[dict] = []
-    for el in container.iterfind(f"{_NS}{member_tag}"):
+    for el in container.iterfind(f"{ns}{member_tag}"):
         rel = {
             "nature": nature or el.get("Nature"),
             "target_id": f"CWE-{el.get('CWE_ID')}",
@@ -117,15 +120,41 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
     status 付きでそのまま収録する (削除は status で表現され、行は消えない)。
     """
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        name = next(n for n in zf.namelist() if n.endswith(".xml"))
-        root = DET.fromstring(zf.read(name))
+        names = [n for n in zf.namelist() if n.endswith(".xml")]
+        if len(names) != 1:
+            raise ValueError("CWE ZIP には XML カタログが1件必要です")
+        root = DET.fromstring(zf.read(names[0]))
+    namespace, _, local_name = root.tag.removeprefix("{").partition("}")
+    if namespace not in _NAMESPACES or local_name != "Weakness_Catalog":
+        raise ValueError(f"未対応の CWE カタログ形式: {root.tag}")
+    ns = "{" + namespace + "}"
+    category_section, category_tag = (
+        ("Categories", "Category")
+        if namespace.endswith("cwe-7")
+        else ("Groupings", "Grouping")
+    )
+    # 一部の要素だけを読み飛ばした断面も公開しない。
+    for section, entry in (
+        ("Weaknesses", "Weakness"),
+        (category_section, category_tag),
+        ("Views", "View"),
+    ):
+        container = root.find(f"{ns}{section}")
+        if container is None:
+            raise ValueError(f"CWE カタログに {section} がありません")
+        if any(child.tag != f"{ns}{entry}" for child in container):
+            raise ValueError(f"CWE {section} に未対応の要素があります")
+    if root.find(f"{ns}Weaknesses/{ns}Weakness") is None:
+        raise ValueError("CWE カタログに弱点がありません")
     version = root.get("Version")
     release = root.get("Date")
     if not version or not release:
         raise ValueError("Weakness_Catalog に Version / Date 属性がありません")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", version):
+        raise ValueError("CWE Version が不正です")
     release_date = date.fromisoformat(release)
     rows = []
-    for w in root.iterfind(f"{_NS}Weaknesses/{_NS}Weakness"):
+    for w in root.iterfind(f"{ns}Weaknesses/{ns}Weakness"):
         rows.append(
             {
                 "cwe_id": f"CWE-{w.get('ID')}",
@@ -133,14 +162,14 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
                 "name": w.get("Name"),
                 "abstraction": w.get("Abstraction"),
                 "status": w.get("Status"),
-                "description": _text(w, "Description"),
-                "likelihood_of_exploit": _text(w, "Likelihood_Of_Exploit"),
+                "description": _text(w, "Description", ns),
+                "likelihood_of_exploit": _text(w, "Likelihood_Of_Exploit", ns),
                 "relations": _relations(
-                    w.find(f"{_NS}Related_Weaknesses"), "Related_Weakness"
+                    w.find(f"{ns}Related_Weaknesses"), "Related_Weakness", ns
                 ),
             }
         )
-    for c in root.iterfind(f"{_NS}Categories/{_NS}Category"):
+    for c in root.iterfind(f"{ns}{category_section}/{ns}{category_tag}"):
         rows.append(
             {
                 "cwe_id": f"CWE-{c.get('ID')}",
@@ -148,14 +177,14 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
                 "name": c.get("Name"),
                 "abstraction": None,
                 "status": c.get("Status"),
-                "description": _text(c, "Summary"),
+                "description": _text(c, "Summary", ns),
                 "likelihood_of_exploit": None,
                 "relations": _relations(
-                    c.find(f"{_NS}Relationships"), "Has_Member", nature="HasMember"
+                    c.find(f"{ns}Relationships"), "Has_Member", ns, nature="HasMember"
                 ),
             }
         )
-    for v in root.iterfind(f"{_NS}Views/{_NS}View"):
+    for v in root.iterfind(f"{ns}Views/{ns}View"):
         rows.append(
             {
                 "cwe_id": f"CWE-{v.get('ID')}",
@@ -163,13 +192,19 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
                 "name": v.get("Name"),
                 "abstraction": None,
                 "status": v.get("Status"),
-                "description": _text(v, "Objective"),
+                "description": _text(v, "Objective", ns),
                 "likelihood_of_exploit": None,
                 "relations": _relations(
-                    v.find(f"{_NS}Members"), "Has_Member", nature="HasMember"
+                    v.find(f"{ns}Members"), "Has_Member", ns, nature="HasMember"
                 ),
             }
         )
+    # Grouping は従来の category に正規化し、既存クエリとの互換性を維持する。
+    ids = [row["cwe_id"] for row in rows]
+    if any(not re.fullmatch(r"CWE-[0-9]+", ident) for ident in ids):
+        raise ValueError("CWE エントリの ID が不正です")
+    if len(set(ids)) != len(ids):
+        raise ValueError("CWE エントリの ID が重複しています")
     for row in rows:
         row["cwe_version"] = version
         row["release_date"] = release_date

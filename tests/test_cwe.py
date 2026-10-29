@@ -1,4 +1,8 @@
+import io
+import zipfile
 from datetime import date
+
+import pytest
 
 from tests.conftest import make_cwe_xml_zip
 from vlake import cwe
@@ -94,3 +98,77 @@ def test_fetch_unconditional_without_previous(monkeypatch):
 
     monkeypatch.setattr(cwe.httpx, "get", fake_get)
     assert cwe.fetch(None) == (b"zipbytes", "Fri, 01 May 2026 00:00:00 GMT")
+
+
+def test_parse_schema_8_preserves_fields_and_category_contract():
+    _, _, old = cwe.parse_catalog(make_cwe_xml_zip())
+    version, release, rows = cwe.parse_catalog(
+        make_cwe_xml_zip(
+            namespace="http://cwe.mitre.org/cwe-8",
+            version="5.0",
+            date_str="2026-10-28",
+        )
+    )
+    assert (version, release) == ("5.0", date(2026, 10, 28))
+    assert rows == [dict(r, cwe_version=version, release_date=release) for r in old]
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"namespace": "http://cwe.mitre.org/cwe-9"}, "未対応"),
+        ({"namespace": ""}, "未対応"),
+        ({"weaknesses": [], "categories": [], "views": []}, "弱点"),
+        ({"weaknesses": []}, "弱点"),
+        ({"version": "../../bad"}, "Version"),
+    ],
+)
+def test_parse_catalog_rejects_unsupported_or_empty(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        cwe.parse_catalog(make_cwe_xml_zip(**kwargs))
+
+
+def test_parse_catalog_rejects_partial_namespace_mismatch():
+    raw = make_cwe_xml_zip(namespace="http://cwe.mitre.org/cwe-8")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(
+            b"<Grouping ", b'<Grouping xmlns="http://cwe.mitre.org/cwe-7" '
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match="未対応"):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        (b"Weakness_Catalog", b"Other_Catalog", "未対応"),
+        (b"<Views>", b"<OtherViews>", "Views"),
+        (b'ID="79"', b'ID="74"', "重複"),
+        (b'ID="79"', b'ID="bad"', "ID"),
+        (b'Version="4.20"', b'Version=""', "Version"),
+    ],
+)
+def test_parse_catalog_rejects_malformed_metadata_and_structure(old, new, message):
+    with zipfile.ZipFile(io.BytesIO(make_cwe_xml_zip())) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(old, new)
+    # セクション名変更時は閉じタグも対応させる。
+    if old == b"<Views>":
+        xml = xml.replace(b"</Views>", b"</OtherViews>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match=message):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_parse_catalog_rejects_ambiguous_zip(count):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        for n in range(count):
+            archive.writestr(f"catalog-{n}.xml", "<catalog/>")
+    with pytest.raises(ValueError, match="1件"):
+        cwe.parse_catalog(buf.getvalue())
