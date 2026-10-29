@@ -1,3 +1,5 @@
+import io
+import zipfile
 from datetime import date
 
 import duckdb
@@ -175,3 +177,87 @@ def test_rebuild_catalog_covers_cwe(cfg, monkeypatch):
     con = _attach(cfg)
     assert con.execute("SELECT count(*) FROM frozen.cwe_history").fetchone()[0] == 5
     assert con.execute("SELECT count(*) FROM frozen.cwe").fetchone()[0] == 5
+
+
+def test_update_cwe_schema_8_and_verify(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+    _patch_fetch(
+        monkeypatch,
+        make_cwe_xml_zip(
+            namespace="http://cwe.mitre.org/cwe-8",
+            version="5.0",
+            date_str="2026-10-28",
+        ),
+        LM2,
+    )
+    assert pipeline.update_cwe(cfg) == "published 5.0 (5 records)"
+    with _attach(cfg) as con:
+        assert con.execute(
+            "SELECT DISTINCT cwe_version FROM frozen.cwe"
+        ).fetchall() == [("5.0",)]
+        assert con.execute(
+            "SELECT entry_type FROM frozen.cwe WHERE cwe_id = 'CWE-137'"
+        ).fetchone() == ("category",)
+    assert pipeline.verify(cfg)["ok"] is True
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize(
+    "invalid",
+    ["unknown", "empty", "empty_parser", "duplicate", "child_namespace", "xhtml"],
+)
+def test_update_cwe_invalid_input_never_writes(cfg, monkeypatch, existing, invalid):
+    if existing:
+        _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+        pipeline.update_cwe(cfg)
+    before = {
+        p.relative_to(cfg.local_dir): p.read_bytes()
+        for p in cfg.local_dir.rglob("*")
+        if p.is_file()
+    }
+    kwargs = (
+        {"namespace": "http://cwe.mitre.org/cwe-9"}
+        if invalid == "unknown"
+        else {"weaknesses": [], "categories": [], "views": []}
+    )
+    raw = make_cwe_xml_zip(**kwargs)
+    if invalid in {"duplicate", "child_namespace", "xhtml"}:
+        raw = make_cwe_xml_zip(namespace="http://cwe.mitre.org/cwe-8", version="5.0")
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            xml = archive.read(archive.namelist()[0])
+        if invalid == "duplicate":
+            xml = xml.replace(b"<Groupings>", b"<Groupings/><Groupings>")
+        else:
+            namespace = (
+                "http://www.w3.org/1999/xhtml"
+                if invalid == "xhtml"
+                else "http://cwe.mitre.org/cwe-7"
+            )
+            xml = xml.replace(
+                b"<Summary>", f'<Summary xmlns="{namespace}">'.encode()
+            ).replace(
+                b"<Relationships>", f'<Relationships xmlns="{namespace}">'.encode()
+            )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr("catalog.xml", xml)
+        raw = buf.getvalue()
+    _patch_fetch(monkeypatch, raw, LM2)
+    if invalid == "empty_parser":
+        monkeypatch.setattr(
+            cwe, "parse_catalog", lambda _: ("5.0", date(2026, 10, 28), [])
+        )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("不正な入力で公開処理に到達しました")
+
+    monkeypatch.setattr(pipeline, "_open_lake", forbidden)
+    with pytest.raises(ValueError):
+        pipeline.update_cwe(cfg)
+    after = {
+        p.relative_to(cfg.local_dir): p.read_bytes()
+        for p in cfg.local_dir.rglob("*")
+        if p.is_file()
+    }
+    assert after == before

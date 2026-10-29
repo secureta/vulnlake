@@ -1,4 +1,9 @@
+import io
+import re
+import zipfile
 from datetime import date
+
+import pytest
 
 from tests.conftest import make_cwe_xml_zip
 from vlake import cwe
@@ -94,3 +99,142 @@ def test_fetch_unconditional_without_previous(monkeypatch):
 
     monkeypatch.setattr(cwe.httpx, "get", fake_get)
     assert cwe.fetch(None) == (b"zipbytes", "Fri, 01 May 2026 00:00:00 GMT")
+
+
+def test_parse_schema_8_preserves_fields_and_category_contract():
+    _, _, old = cwe.parse_catalog(make_cwe_xml_zip())
+    version, release, rows = cwe.parse_catalog(
+        make_cwe_xml_zip(
+            namespace="http://cwe.mitre.org/cwe-8",
+            version="5.0",
+            date_str="2026-10-28",
+        )
+    )
+    assert (version, release) == ("5.0", date(2026, 10, 28))
+    assert rows == [dict(r, cwe_version=version, release_date=release) for r in old]
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"namespace": "http://cwe.mitre.org/cwe-9"}, "未対応"),
+        ({"namespace": ""}, "未対応"),
+        ({"weaknesses": [], "categories": [], "views": []}, "弱点"),
+        ({"weaknesses": []}, "弱点"),
+        ({"version": "../../bad"}, "Version"),
+    ],
+)
+def test_parse_catalog_rejects_unsupported_or_empty(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        cwe.parse_catalog(make_cwe_xml_zip(**kwargs))
+
+
+def test_parse_catalog_rejects_partial_namespace_mismatch():
+    raw = make_cwe_xml_zip(namespace="http://cwe.mitre.org/cwe-8")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(
+            b"<Grouping ", b'<Grouping xmlns="http://cwe.mitre.org/cwe-7" '
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match="未対応"):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        (b"Weakness_Catalog", b"Other_Catalog", "未対応"),
+        (b"<Views>", b"<OtherViews>", "Views"),
+        (b'ID="79"', b'ID="74"', "重複"),
+        (b'ID="79"', b'ID="bad"', "ID"),
+        (b'Version="4.20"', b'Version=""', "Version"),
+    ],
+)
+def test_parse_catalog_rejects_malformed_metadata_and_structure(old, new, message):
+    with zipfile.ZipFile(io.BytesIO(make_cwe_xml_zip())) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(old, new)
+    if old == b"<Views>":
+        xml = xml.replace(b"</Views>", b"</OtherViews>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match=message):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize("schema", ["7", "8"])
+@pytest.mark.parametrize("section", ["Weaknesses", "Categories", "Views"])
+def test_parse_catalog_rejects_duplicate_sections(schema, section):
+    if schema == "8" and section == "Categories":
+        section = "Groupings"
+    raw = make_cwe_xml_zip(namespace=f"http://cwe.mitre.org/cwe-{schema}")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(
+            f"<{section}>".encode(), f"<{section}/><{section}>".encode()
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match=section):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize("schema", ["7", "8"])
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "Description",
+        "Likelihood_Of_Exploit",
+        "Related_Weaknesses",
+        "Related_Weakness",
+        "Summary",
+        "Relationships",
+        "Has_Member",
+        "Objective",
+        "Members",
+    ],
+)
+@pytest.mark.parametrize("namespace", ["other_cwe", "http://www.w3.org/1999/xhtml", ""])
+def test_parse_catalog_rejects_child_namespace_mismatch(schema, tag, namespace):
+    raw = make_cwe_xml_zip(namespace=f"http://cwe.mitre.org/cwe-{schema}")
+    if namespace == "other_cwe":
+        other = "8" if schema == "7" else "7"
+        namespace = f"http://cwe.mitre.org/cwe-{other}"
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        xml = re.sub(
+            f"<{tag}(?=[ >])".encode(),
+            f'<{tag} xmlns="{namespace}"'.encode(),
+            archive.read(archive.namelist()[0]),
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    with pytest.raises(ValueError, match="名前空間"):
+        cwe.parse_catalog(buf.getvalue())
+
+
+@pytest.mark.parametrize("schema", ["7", "8"])
+def test_parse_catalog_preserves_xhtml_text(schema):
+    raw = make_cwe_xml_zip(namespace=f"http://cwe.mitre.org/cwe-{schema}")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        xml = archive.read(archive.namelist()[0]).replace(
+            b"<Summary>", b"<Summary>before <xhtml:p>inside</xhtml:p> after "
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("catalog.xml", xml)
+    _, _, rows = cwe.parse_catalog(buf.getvalue())
+    category = next(row for row in rows if row["entry_type"] == "category")
+    assert category["description"].startswith("before inside after Weaknesses")
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_parse_catalog_rejects_ambiguous_zip(count):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        for n in range(count):
+            archive.writestr(f"catalog-{n}.xml", "<catalog/>")
+    with pytest.raises(ValueError, match="1件"):
+        cwe.parse_catalog(buf.getvalue())

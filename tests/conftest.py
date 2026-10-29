@@ -431,6 +431,7 @@ def _cwe_view_xml(v: dict) -> str:
 
 def make_cwe_xml_zip(
     *,
+    namespace: str = "http://cwe.mitre.org/cwe-7",
     version: str = "4.20",
     date_str: str = "2026-04-30",
     weaknesses: list[dict] | None = None,
@@ -515,13 +516,15 @@ def make_cwe_xml_zip(
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f'<Weakness_Catalog Name="CWE" Version="{version}" Date="{date_str}" '
-        'xmlns="http://cwe.mitre.org/cwe-7" '
+        f'xmlns="{namespace}" '
         'xmlns:xhtml="http://www.w3.org/1999/xhtml">'
         f"<Weaknesses>{''.join(_cwe_weakness_xml(w) for w in weaknesses)}</Weaknesses>"
         f"<Categories>{''.join(_cwe_category_xml(c) for c in categories)}</Categories>"
         f"<Views>{''.join(_cwe_view_xml(v) for v in views)}</Views>"
         "</Weakness_Catalog>"
     )
+    if namespace.endswith("cwe-8"):
+        xml = xml.replace("Categories", "Groupings").replace("Category", "Grouping")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"cwec_v{version}.xml", xml)
