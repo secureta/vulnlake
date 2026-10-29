@@ -1,3 +1,5 @@
+import io
+import zipfile
 from datetime import date
 
 import duckdb
@@ -201,7 +203,10 @@ def test_update_cwe_schema_8_and_verify(cfg, monkeypatch):
 
 
 @pytest.mark.parametrize("existing", [False, True])
-@pytest.mark.parametrize("invalid", ["unknown", "empty", "empty_parser"])
+@pytest.mark.parametrize(
+    "invalid",
+    ["unknown", "empty", "empty_parser", "duplicate", "child_namespace", "xhtml"],
+)
 def test_update_cwe_invalid_input_never_writes(cfg, monkeypatch, existing, invalid):
     if existing:
         _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
@@ -216,7 +221,29 @@ def test_update_cwe_invalid_input_never_writes(cfg, monkeypatch, existing, inval
         if invalid == "unknown"
         else {"weaknesses": [], "categories": [], "views": []}
     )
-    _patch_fetch(monkeypatch, make_cwe_xml_zip(**kwargs), LM2)
+    raw = make_cwe_xml_zip(**kwargs)
+    if invalid in {"duplicate", "child_namespace", "xhtml"}:
+        raw = make_cwe_xml_zip(namespace="http://cwe.mitre.org/cwe-8", version="5.0")
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            xml = archive.read(archive.namelist()[0])
+        if invalid == "duplicate":
+            xml = xml.replace(b"<Groupings>", b"<Groupings/><Groupings>")
+        else:
+            namespace = (
+                "http://www.w3.org/1999/xhtml"
+                if invalid == "xhtml"
+                else "http://cwe.mitre.org/cwe-7"
+            )
+            xml = xml.replace(
+                b"<Summary>", f'<Summary xmlns="{namespace}">'.encode()
+            ).replace(
+                b"<Relationships>", f'<Relationships xmlns="{namespace}">'.encode()
+            )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr("catalog.xml", xml)
+        raw = buf.getvalue()
+    _patch_fetch(monkeypatch, raw, LM2)
     if invalid == "empty_parser":
         monkeypatch.setattr(
             cwe, "parse_catalog", lambda _: ("5.0", date(2026, 10, 28), [])

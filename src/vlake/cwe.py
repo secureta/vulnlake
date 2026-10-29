@@ -128,21 +128,45 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
     if namespace not in _NAMESPACES or local_name != "Weakness_Catalog":
         raise ValueError(f"未対応の CWE カタログ形式: {root.tag}")
     ns = "{" + namespace + "}"
+    if any(
+        not elem.tag.startswith((ns, "{http://www.w3.org/1999/xhtml}"))
+        for elem in root.iter()
+    ):
+        raise ValueError("CWE カタログに未対応の名前空間があります")
     category_section, category_tag = (
         ("Categories", "Category")
         if namespace.endswith("cwe-7")
         else ("Groupings", "Grouping")
     )
-    # 一部の要素だけを読み飛ばした断面も公開しない。
+    structural_tags = {
+        f"{ns}{tag}"
+        for tag in (
+            "Weakness_Catalog",
+            "Weaknesses",
+            "Weakness",
+            category_section,
+            category_tag,
+            "Views",
+            "View",
+            "Related_Weaknesses",
+            "Relationships",
+            "Members",
+        )
+    }
+    for elem in root.iter():
+        if elem.tag in structural_tags and any(
+            not child.tag.startswith(ns) for child in elem
+        ):
+            raise ValueError("CWE 構造要素に未対応の名前空間があります")
     for section, entry in (
         ("Weaknesses", "Weakness"),
         (category_section, category_tag),
         ("Views", "View"),
     ):
-        container = root.find(f"{ns}{section}")
-        if container is None:
-            raise ValueError(f"CWE カタログに {section} がありません")
-        if any(child.tag != f"{ns}{entry}" for child in container):
+        containers = root.findall(f"{ns}{section}")
+        if len(containers) != 1:
+            raise ValueError(f"CWE カタログには {section} が1件必要です")
+        if any(child.tag != f"{ns}{entry}" for child in containers[0]):
             raise ValueError(f"CWE {section} に未対応の要素があります")
     if root.find(f"{ns}Weaknesses/{ns}Weakness") is None:
         raise ValueError("CWE カタログに弱点がありません")
@@ -199,7 +223,6 @@ def parse_catalog(zip_bytes: bytes) -> tuple[str, date, list[dict]]:
                 ),
             }
         )
-    # Grouping は従来の category に正規化し、既存クエリとの互換性を維持する。
     ids = [row["cwe_id"] for row in rows]
     if any(not re.fullmatch(r"CWE-[0-9]+", ident) for ident in ids):
         raise ValueError("CWE エントリの ID が不正です")
