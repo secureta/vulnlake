@@ -8,6 +8,7 @@ import pytest
 from tests.conftest import make_cwe_xml_zip
 from vlake import cwe, pipeline
 from vlake.config import Config
+from vlake.lake import Lake
 
 LM1 = "Thu, 30 Apr 2026 09:15:04 GMT"
 LM2 = "Fri, 30 Oct 2026 09:00:00 GMT"
@@ -32,7 +33,7 @@ def _attach(cfg):
     return con
 
 
-def _patch_fetch(monkeypatch, zip_bytes, last_modified):
+def _patch_fetch(monkeypatch, zip_bytes, last_modified, *, conditional=False):
     """cwe.fetch を偽装し、渡された prev_last_modified の記録を返す。
 
     zip_bytes=None は 304 (not-modified) を意味する。
@@ -41,7 +42,7 @@ def _patch_fetch(monkeypatch, zip_bytes, last_modified):
 
     def fake_fetch(prev_last_modified=None):
         calls.append(prev_last_modified)
-        if zip_bytes is None:
+        if zip_bytes is None or (conditional and prev_last_modified == last_modified):
             return None
         return zip_bytes, last_modified
 
@@ -82,6 +83,101 @@ def test_update_cwe_not_modified_short_circuits(cfg, monkeypatch):
     calls = _patch_fetch(monkeypatch, None, None)
     assert pipeline.update_cwe(cfg) == "not-modified"
     assert calls == [LM1]  # 保存済み Last-Modified が条件付き GET に渡る
+
+
+def test_update_cwe_recovers_empty_unregistered_snapshot(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+    pending = cfg.local_dir / cwe.key_for_version("5.0")
+    pending.parent.mkdir(parents=True)
+    cwe.write_parquet(cwe.rows_to_table([]), pending)
+    marker = cfg.local_dir / cwe.LAST_MODIFIED_KEY
+    marker.write_text(LM2 + "\n")
+    assert pipeline.verify(cfg)["ok"] is False
+
+    calls = _patch_fetch(
+        monkeypatch,
+        make_cwe_xml_zip(
+            namespace="http://cwe.mitre.org/cwe-8",
+            version="5.0",
+            date_str="2026-10-28",
+        ),
+        LM2,
+        conditional=True,
+    )
+    assert pipeline.update_cwe(cfg) == "published 5.0 (5 records)"
+    assert calls == [None]
+    assert marker.read_text().strip() == LM2
+    with _attach(cfg) as con:
+        assert (
+            con.execute("SELECT count(*) FROM frozen.cwe_history").fetchone()[0] == 10
+        )
+        assert con.execute(
+            "SELECT DISTINCT cwe_version FROM frozen.cwe"
+        ).fetchall() == [("5.0",)]
+    assert pipeline.verify(cfg)["ok"] is True
+
+    calls = _patch_fetch(monkeypatch, None, None)
+    assert pipeline.update_cwe(cfg) == "not-modified"
+    assert calls == [LM2]
+
+
+@pytest.mark.parametrize("missing_catalog", [False, True])
+@pytest.mark.parametrize("missing_data", [False, True])
+def test_update_cwe_marker_without_registered_snapshot(
+    cfg, monkeypatch, missing_catalog, missing_data
+):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+    catalog = cfg.local_dir / pipeline.CATALOG_KEY
+    catalog.unlink()
+    if missing_data:
+        (cfg.local_dir / cwe.key_for_version("4.20")).unlink()
+    if not missing_catalog:
+        lake = Lake(catalog)
+        try:
+            lake.ensure_tables()
+        finally:
+            lake.close()
+    calls = _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1, conditional=True)
+    assert pipeline.update_cwe(cfg) == "published 4.20 (5 records)"
+    assert calls == [None]
+    assert pipeline.verify(cfg)["ok"] is True
+
+
+def test_update_cwe_recovery_publish_failure_is_retryable(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+    pending = cfg.local_dir / cwe.key_for_version("5.0")
+    pending.parent.mkdir(parents=True)
+    cwe.write_parquet(cwe.rows_to_table([]), pending)
+    catalog = cfg.local_dir / pipeline.CATALOG_KEY
+    before = catalog.read_bytes()
+    marker = cfg.local_dir / cwe.LAST_MODIFIED_KEY
+    marker.write_text(LM2 + "\n")
+    calls = _patch_fetch(
+        monkeypatch,
+        make_cwe_xml_zip(
+            namespace="http://cwe.mitre.org/cwe-8",
+            version="5.0",
+            date_str="2026-10-28",
+        ),
+        LM2,
+        conditional=True,
+    )
+
+    def fail_publish(*args):
+        raise RuntimeError("publish failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pipeline, "_publish_catalog", fail_publish)
+        with pytest.raises(RuntimeError, match="publish failed"):
+            pipeline.update_cwe(cfg)
+    assert catalog.read_bytes() == before
+    assert marker.read_text() == LM2 + "\n"
+    assert pipeline.update_cwe(cfg) == "published 5.0 (5 records)"
+    assert calls == [None, None]
+    assert pipeline.verify(cfg)["ok"] is True
 
 
 def test_update_cwe_same_version_already_registered(cfg, monkeypatch):
@@ -252,7 +348,8 @@ def test_update_cwe_invalid_input_never_writes(cfg, monkeypatch, existing, inval
     def forbidden(*args, **kwargs):
         pytest.fail("不正な入力で公開処理に到達しました")
 
-    monkeypatch.setattr(pipeline, "_open_lake", forbidden)
+    monkeypatch.setattr(pipeline, "_publish_catalog", forbidden)
+    monkeypatch.setattr(cwe, "write_parquet", forbidden)
     with pytest.raises(ValueError):
         pipeline.update_cwe(cfg)
     after = {
