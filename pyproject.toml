@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Security datasets published as a frozen DuckLake on S3-compatible storage"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.14.6,<3.15"
+requires-python = ">=3.15.2,<3.16"
 dependencies = [
-    "duckdb>=1.5.4",
-    "pyarrow>=25.0.0",
-    "boto3>=1.43.48",
+    "duckdb>=1.5.6",
+    "pyarrow>=25.0.1",
+    "boto3>=1.43.120",
     "httpx>=0.28.1",
-    "click>=8.4.2",
+    "click>=8.5.0",
     "cvss>=3.6",
     "pyyaml>=6.0.3",
     "defusedxml>=0.7.1",
@@ -22,12 +22,12 @@ vlake = "vlake.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-    "ruff>=0.15.21",
-    "zizmor>=1.27.0",
+    "ruff>=0.17.3",
+    "zizmor>=1.31.1",
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.28,<0.12"]
+requires = ["uv_build>=0.13.6,<0.14"]
 build-backend = "uv_build"
 
 [tool.ruff]
