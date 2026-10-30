@@ -797,7 +797,7 @@ def update_cwe(cfg: Config) -> str:
     """cwec XML の新バージョン断面を全件スナップショットとして追記する。
 
     CWE は年数回しか更新されないため、前回成功時の Last-Modified による
-    条件付き GET (304 なら即終了、レイクも開かない) で日次実行の無駄な
+    条件付き GET (304 なら即終了) で日次実行の無駄な
     ダウンロードを避ける。Last-Modified の保存はカタログ公開成功後のみ
     行い、途中失敗時は次回が無条件 GET からやり直す (冪等回復)。
     カタログが空なら初回 update が全量投入となるため backfill は存在しない。
@@ -811,17 +811,26 @@ def update_cwe(cfg: Config) -> str:
         prev_lm = None
         if storage.get(cwe.LAST_MODIFIED_KEY, lm_path):
             prev_lm = lm_path.read_text().strip() or None
-        fetched = cwe.fetch(prev_lm)
-        if fetched is None:
-            return "not-modified"
-        raw_zip, last_modified = fetched
-        version, _, rows = cwe.parse_catalog(raw_zip)
-        if not rows:
-            raise ValueError("空の CWE カタログは公開できません")
-        key = cwe.key_for_version(version)
         lake, catalog = _open_lake(storage, workdir)
         try:
-            if storage.url(key) in lake.registered_paths():
+            registered = lake.registered_paths("cwe_history")
+            if prev_lm:
+                stored = {
+                    storage.url(key)
+                    for key in storage.list("cwe/")
+                    if key.endswith(".parquet")
+                }
+                if not registered or stored != registered:
+                    prev_lm = None
+            fetched = cwe.fetch(prev_lm)
+            if fetched is None:
+                return "not-modified"
+            raw_zip, last_modified = fetched
+            version, _, rows = cwe.parse_catalog(raw_zip)
+            if not rows:
+                raise ValueError("空の CWE カタログは公開できません")
+            key = cwe.key_for_version(version)
+            if storage.url(key) in registered:
                 result = f"already-registered {version}"
             else:
                 parquet = workdir / "snapshot.parquet"
