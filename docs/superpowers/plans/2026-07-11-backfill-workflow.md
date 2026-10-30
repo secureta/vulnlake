@@ -174,10 +174,16 @@ git commit -m "feat: 年ファイル命名を追加、verify を年単位 min �
 def test_backfill_consolidates_closed_years(cfg, tmp_path):
     src = tmp_path / "mirror"
     days = [
-        (date(2021, 4, 14), [("CVE-2020-5902", 0.65117)],
-         dict(with_comment=False, with_percentile=False)),
-        (date(2021, 4, 15), [("CVE-2020-5902", 0.66, 0.99), ("CVE-2020-0001", 0.01, 0.1)],
-         dict(model_version="v1")),
+        (
+            date(2021, 4, 14),
+            [("CVE-2020-5902", 0.65117)],
+            dict(with_comment=False, with_percentile=False),
+        ),
+        (
+            date(2021, 4, 15),
+            [("CVE-2020-5902", 0.66, 0.99), ("CVE-2020-0001", 0.01, 0.1)],
+            dict(model_version="v1"),
+        ),
         (date(2022, 1, 1), [("CVE-2020-5902", 0.7, 0.99)], dict(model_version="v2")),
         (date(2023, 1, 5), [("CVE-2020-5902", 0.8, 0.99)], dict(model_version="v3")),
         (date(2023, 1, 6), [("CVE-2020-5902", 0.81, 0.99)], dict(model_version="v3")),
@@ -259,7 +265,11 @@ def _sort_merge(day_dir: Path, out: Path, workdir: Path) -> None:
 
 
 def _ingest_year(
-    storage: Storage, lake: Lake, year: int, days: list[tuple[date, Path]], workdir: Path
+    storage: Storage,
+    lake: Lake,
+    year: int,
+    days: list[tuple[date, Path]],
+    workdir: Path,
 ) -> None:
     """確定年の全日次 CSV を年1ファイルに集約して登録する。"""
     day_dir = workdir / f"days-{year}"
@@ -318,7 +328,11 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
                 else:
                     for d, path in days:
                         ok, _ = _ingest_day(
-                            storage, lake, path.read_bytes(), fallback=d, workdir=workdir
+                            storage,
+                            lake,
+                            path.read_bytes(),
+                            fallback=d,
+                            workdir=workdir,
                         )
                         added_days += ok
                         skipped_days += not ok

@@ -680,7 +680,7 @@ class Lake:
                 FROM {self.ALIAS}.cwe_history
                 GROUP BY cwe_version, release_date
                 ORDER BY release_date DESC, list_transform(
-                    string_split(cwe_version, '.'), x -> try_cast(x AS INTEGER)
+                    string_split(cwe_version, '.'), lambda x: try_cast(x AS INTEGER)
                 ) DESC
                 LIMIT 1
             )
