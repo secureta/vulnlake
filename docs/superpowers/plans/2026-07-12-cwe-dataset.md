@@ -191,8 +191,7 @@ def make_cwe_xml_zip(
                 "name": "Research Concepts",
                 "status": "Draft",
                 "objective": (
-                    "This view is intended to facilitate research into "
-                    "weaknesses."
+                    "This view is intended to facilitate research into weaknesses."
                 ),
                 "members": ["74"],
             }
@@ -753,12 +752,12 @@ def test_update_cwe_new_version_switches_view(cfg, monkeypatch):
 
     con = _attach(cfg)
     assert con.execute("SELECT count(*) FROM frozen.cwe_history").fetchone()[0] == 10
-    assert con.execute(
-        "SELECT DISTINCT cwe_version FROM frozen.cwe"
-    ).fetchall() == [("4.21",)]
-    assert con.execute(
-        "SELECT max(release_date) FROM frozen.cwe"
-    ).fetchone()[0] == date(2026, 10, 30)
+    assert con.execute("SELECT DISTINCT cwe_version FROM frozen.cwe").fetchall() == [
+        ("4.21",)
+    ]
+    assert con.execute("SELECT max(release_date) FROM frozen.cwe").fetchone()[
+        0
+    ] == date(2026, 10, 30)
 
 
 def test_update_cwe_failure_does_not_save_last_modified(cfg, monkeypatch):

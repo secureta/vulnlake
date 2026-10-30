@@ -187,7 +187,12 @@ def test_from_env_s3(monkeypatch):
 
 
 def test_from_env_missing(monkeypatch):
-    for var in ("VLAKE_S3_BUCKET", "VLAKE_LOCAL_DIR", "VLAKE_PUBLIC_URL", "VLAKE_S3_ENDPOINT"):
+    for var in (
+        "VLAKE_S3_BUCKET",
+        "VLAKE_LOCAL_DIR",
+        "VLAKE_PUBLIC_URL",
+        "VLAKE_S3_ENDPOINT",
+    ):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(SystemExit):
         Config.from_env()
@@ -341,9 +346,7 @@ class LocalStorage:
         if not self.root.exists():
             return []
         keys = (
-            str(p.relative_to(self.root))
-            for p in self.root.rglob("*")
-            if p.is_file()
+            str(p.relative_to(self.root)) for p in self.root.rglob("*") if p.is_file()
         )
         return sorted(k for k in keys if k.startswith(prefix))
 
@@ -538,7 +541,14 @@ def test_write_parquet_roundtrip(tmp_path):
 
 
 def test_license_info_complete():
-    for key in ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer"):
+    for key in (
+        "name",
+        "source_url",
+        "license_name",
+        "license_text",
+        "attribution",
+        "disclaimer",
+    ):
         assert epss.LICENSE_INFO[key]
     assert "not endorsed or certified by FIRST" in epss.LICENSE_INFO["disclaimer"]
 ```
@@ -712,7 +722,9 @@ from vlake.lake import Lake
 
 
 def _make_parquet(tmp_path: Path, d: date) -> Path:
-    raw = make_epss_csv_gz(d, [("CVE-1999-0001", 0.1, 0.5), ("CVE-1999-0002", 0.2, 0.6)])
+    raw = make_epss_csv_gz(
+        d, [("CVE-1999-0001", 0.1, 0.5), ("CVE-1999-0002", 0.2, 0.6)]
+    )
     table, _, _ = epss.parse(raw, fallback_date=d)
     out = tmp_path / f"epss-{d.isoformat()}.parquet"
     epss.write_parquet(table, out)
@@ -853,9 +865,17 @@ class Lake:
             pass  # 拡張のバージョンによっては未対応。注記は必須機能ではない
 
     def refresh_datasets_view(self, infos: list[dict]) -> None:
-        cols = ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer")
+        cols = (
+            "name",
+            "source_url",
+            "license_name",
+            "license_text",
+            "attribution",
+            "disclaimer",
+        )
         values = ", ".join(
-            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")" for info in infos
+            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")"
+            for info in infos
         )
         self.con.execute(
             f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "
@@ -926,7 +946,9 @@ def cfg(tmp_path):
 def _attach(cfg):
     con = duckdb.connect()
     con.execute("INSTALL ducklake; LOAD ducklake;")
-    con.execute(f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)")
+    con.execute(
+        f"ATTACH 'ducklake:{cfg.local_dir / 'vlake.ducklake'}' AS frozen (READ_ONLY)"
+    )
     return con
 
 
@@ -1254,8 +1276,13 @@ def main() -> None:
 
 @main.command()
 @click.argument("dataset", type=click.Choice(["epss"]))
-@click.option("--date", "target", type=click.DateTime(["%Y-%m-%d"]), default=None,
-              help="取得する日付 (省略時は最新)")
+@click.option(
+    "--date",
+    "target",
+    type=click.DateTime(["%Y-%m-%d"]),
+    default=None,
+    help="取得する日付 (省略時は最新)",
+)
 def update(dataset: str, target) -> None:
     """日次更新 (冪等)。"""
     cfg = Config.from_env()
@@ -1264,9 +1291,12 @@ def update(dataset: str, target) -> None:
 
 @main.command()
 @click.argument("dataset", type=click.Choice(["epss"]))
-@click.option("--source", required=True,
-              type=click.Path(exists=True, file_okay=False, path_type=Path),
-              help="empiricalsec/epss_scores の clone ディレクトリ")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="empiricalsec/epss_scores の clone ディレクトリ",
+)
 def backfill(dataset: str, source: Path) -> None:
     """全履歴の一括取り込み (冪等)。"""
     cfg = Config.from_env()
