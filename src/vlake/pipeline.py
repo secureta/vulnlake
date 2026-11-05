@@ -124,14 +124,9 @@ def _sort_merge(day_dir: Path, out: Path, workdir: Path) -> None:
     """
     con = duckdb.connect()
     try:
-        tmp = str(workdir / "duckdb_tmp").replace("'", "''")
-        src = str(day_dir / "*.parquet").replace("'", "''")
-        dst = str(out).replace("'", "''")
-        con.execute(f"SET temp_directory='{tmp}'")
-        con.execute(
-            # src/dst は内部生成パスのみ。COPY はパラメータ化非対応
-            f"COPY (SELECT * FROM read_parquet('{src}') ORDER BY cve, date) "  # noqa: S608
-            f"TO '{dst}' (FORMAT parquet, COMPRESSION zstd)"
+        con.execute("SET temp_directory = ?", [str(workdir / "duckdb_tmp")])
+        con.read_parquet(str(day_dir / "*.parquet")).order("cve, date").write_parquet(
+            str(out), compression="zstd"
         )
     finally:
         con.close()

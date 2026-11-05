@@ -236,11 +236,11 @@ class Lake:
             ).fetchall()
         else:
             rows = self.con.execute(
-                # META はクラス定数の固定識別子、table は _q() でエスケープ済み
                 f"""SELECT f.path FROM {self.META}.ducklake_data_file f
                     JOIN {self.META}.ducklake_table t ON f.table_id = t.table_id
                     WHERE f.end_snapshot IS NULL AND t.end_snapshot IS NULL
-                      AND t.table_name = '{_q(table)}'"""  # noqa: S608
+                      AND t.table_name = ?""",  # noqa: S608
+                [table],
             ).fetchall()
         return {r[0] for r in rows}
 
@@ -744,14 +744,14 @@ class Lake:
         if path in self.registered_paths():
             return False
         self.con.execute(
-            f"CALL ducklake_add_data_files('{self.ALIAS}', '{_q(table)}', '{_q(path)}')"
+            "CALL ducklake_add_data_files(?, ?, ?)", [self.ALIAS, table, path]
         )
         return True
 
     def set_message(self, message: str) -> None:
         try:
             self.con.execute(
-                f"CALL {self.ALIAS}.set_commit_message('vlake', '{_q(message)}')"
+                f"CALL {self.ALIAS}.set_commit_message('vlake', ?)", [message]
             )
         except duckdb.Error:
             pass  # 拡張のバージョンによっては未対応。注記は必須機能ではない
