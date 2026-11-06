@@ -478,19 +478,46 @@ def test_custom_lake_alias(tmp_path):
         ALIAS = "custom_lake"
 
     catalog = tmp_path / "vlake.ducklake"
+    parquet = _make_parquet(tmp_path, date(2026, 7, 10))
     lake = CustomLake(catalog, data_path=str(tmp_path / "data"))
     try:
         lake.ensure_tables()
         lake.refresh_cve_view()
         assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+        assert lake.registered_paths() == set()
+        assert lake.add_file("epss", str(parquet)) is True
+        assert lake.registered_paths() == {str(parquet)}
+        assert lake.registered_paths("epss") == {str(parquet)}
+        assert lake.query("SELECT count(*) FROM custom_lake.epss") == [(2,)]
     finally:
         lake.close()
 
     lake = CustomLake(catalog)
     try:
         assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+        assert lake.registered_paths() == {str(parquet)}
+        assert lake.registered_paths("epss") == {str(parquet)}
+        assert lake.add_file("epss", str(parquet)) is False
+        assert lake.query("SELECT count(*) FROM custom_lake.epss") == [(2,)]
     finally:
         lake.close()
+
+
+def test_attach_rejects_multiple_statements(tmp_path, monkeypatch):
+    class InvalidLake(Lake):
+        ALIAS = "custom_lake; SELECT 42"
+
+    con = duckdb.connect()
+    monkeypatch.setattr(duckdb, "connect", lambda: con)
+    try:
+        with pytest.raises(ValueError, match="too many values to unpack"):
+            InvalidLake(tmp_path / "vlake.ducklake")
+        assert con.execute(
+            "SELECT count(*) FROM duckdb_databases() "
+            "WHERE database_name = 'custom_lake'"
+        ).fetchone() == (0,)
+    finally:
+        con.close()
 
 
 def test_datasets_view_preserves_sql_syntax(tmp_path):

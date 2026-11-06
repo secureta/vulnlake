@@ -25,6 +25,7 @@ class Lake:
 
     def __init__(self, catalog_path: Path, data_path: str | None = None):
         self._closed = False
+        self.META = f"__ducklake_metadata_{self.ALIAS}"
         self.con = duckdb.connect()
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -32,9 +33,9 @@ class Lake:
             f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS {self.ALIAS}"
         )
         if data_path:
-            self.con.execute(attach + " (DATA_PATH ?)", [data_path])
-        else:
-            self.con.execute(attach)
+            attach += " (DATA_PATH ?)"
+        (statement,) = self.con.extract_statements(attach)
+        self.con.execute(statement, [data_path] if data_path else None)
 
     def ensure_tables(self) -> None:
         self.con.execute(
@@ -236,7 +237,6 @@ class Lake:
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
             rows = self.con.execute(
-                # META はクラス定数の固定識別子で外部入力は入らない
                 f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
             ).fetchall()
         else:
