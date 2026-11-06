@@ -28,7 +28,9 @@ class Lake:
         self.con = duckdb.connect()
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
-        attach = f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS lake"
+        attach = (
+            f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS {self.ALIAS}"
+        )
         if data_path:
             self.con.execute(attach + " (DATA_PATH ?)", [data_path])
         else:

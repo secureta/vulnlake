@@ -473,6 +473,26 @@ def test_attach_paths_with_sql_syntax(tmp_path):
         lake.close()
 
 
+def test_custom_lake_alias(tmp_path):
+    class CustomLake(Lake):
+        ALIAS = "custom_lake"
+
+    catalog = tmp_path / "vlake.ducklake"
+    lake = CustomLake(catalog, data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.refresh_cve_view()
+        assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+    finally:
+        lake.close()
+
+    lake = CustomLake(catalog)
+    try:
+        assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+    finally:
+        lake.close()
+
+
 def test_datasets_view_preserves_sql_syntax(tmp_path):
     catalog = tmp_path / "vlake.ducklake"
     payload = "'); DROP TABLE lake.epss; --\\\n日本語"
