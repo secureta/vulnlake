@@ -3,10 +3,11 @@ from datetime import date, datetime
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from tests.conftest import make_cve_record, make_epss_csv_gz, make_ghsa_record
 from vlake import cvelist, epss, exploitdb, ghsa
-from vlake.lake import Lake
+from vlake.lake import Lake, _sql_literal
 
 
 def _make_parquet(tmp_path: Path, d: date) -> Path:
@@ -445,6 +446,104 @@ def test_datasets_view(tmp_path):
     con.execute("INSTALL ducklake; LOAD ducklake;")
     con.execute(f"ATTACH 'ducklake:{catalog}' AS frozen (READ_ONLY)")
     assert con.execute("SELECT count(*) FROM frozen.datasets").fetchone()[0] == 1
+
+
+def test_attach_paths_with_sql_syntax(tmp_path):
+    catalog = tmp_path / "catalog'; SELECT 42; --.ducklake"
+    data_path = str(tmp_path / "data'); DETACH lake; --")
+    lake = Lake(catalog, data_path=data_path)
+    try:
+        lake.ensure_tables()
+        assert lake.query(
+            "SELECT value FROM __ducklake_metadata_lake.ducklake_metadata "
+            "WHERE key = 'data_path'"
+        ) == [(data_path + "/",)]
+        assert lake.query("SELECT count(*) FROM lake.epss") == [(0,)]
+    finally:
+        lake.close()
+
+    lake = Lake(catalog)
+    try:
+        assert lake.query(
+            "SELECT value FROM __ducklake_metadata_lake.ducklake_metadata "
+            "WHERE key = 'data_path'"
+        ) == [(data_path + "/",)]
+        assert lake.query("SELECT count(*) FROM lake.epss") == [(0,)]
+    finally:
+        lake.close()
+
+
+def test_custom_lake_alias(tmp_path):
+    class CustomLake(Lake):
+        ALIAS = "custom_lake"
+
+    catalog = tmp_path / "vlake.ducklake"
+    parquet = _make_parquet(tmp_path, date(2026, 7, 10))
+    lake = CustomLake(catalog, data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.refresh_cve_view()
+        assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+        assert lake.registered_paths() == set()
+        assert lake.add_file("epss", str(parquet)) is True
+        assert lake.registered_paths() == {str(parquet)}
+        assert lake.registered_paths("epss") == {str(parquet)}
+        assert lake.query("SELECT count(*) FROM custom_lake.epss") == [(2,)]
+    finally:
+        lake.close()
+
+    lake = CustomLake(catalog)
+    try:
+        assert lake.query("SELECT count(*) FROM custom_lake.cve") == [(0,)]
+        assert lake.registered_paths() == {str(parquet)}
+        assert lake.registered_paths("epss") == {str(parquet)}
+        assert lake.add_file("epss", str(parquet)) is False
+        assert lake.query("SELECT count(*) FROM custom_lake.epss") == [(2,)]
+    finally:
+        lake.close()
+
+
+def test_attach_rejects_multiple_statements(tmp_path, monkeypatch):
+    class InvalidLake(Lake):
+        ALIAS = "custom_lake; SELECT 42"
+
+    con = duckdb.connect()
+    monkeypatch.setattr(duckdb, "connect", lambda: con)
+    try:
+        with pytest.raises(ValueError, match="too many values to unpack"):
+            InvalidLake(tmp_path / "vlake.ducklake")
+        assert con.execute(
+            "SELECT count(*) FROM duckdb_databases() "
+            "WHERE database_name = 'custom_lake'"
+        ).fetchone() == (0,)
+    finally:
+        con.close()
+
+
+def test_datasets_view_preserves_sql_syntax(tmp_path):
+    catalog = tmp_path / "vlake.ducklake"
+    payload = "'); DROP TABLE lake.epss; --\\\n日本語"
+    info = dict.fromkeys(epss.LICENSE_INFO, payload)
+    lake = Lake(catalog, data_path=str(tmp_path / "unused"))
+    try:
+        lake.ensure_tables()
+        lake.refresh_datasets_view([info, epss.LICENSE_INFO])
+        assert lake.query("SELECT count(*) FROM lake.epss") == [(0,)]
+    finally:
+        lake.close()
+
+    lake = Lake(catalog)
+    try:
+        assert lake.con.execute(
+            "SELECT * FROM lake.datasets WHERE name = ?", [payload]
+        ).fetchall() == [(payload,) * 6]
+    finally:
+        lake.close()
+
+
+def test_sql_literal_rejects_nul():
+    with pytest.raises(ValueError, match="NUL"):
+        _sql_literal("prefix\x00'); SELECT 42; --")
 
 
 def _make_ghsa_parquet(tmp_path: Path, ghsa_id: str, modified: str, name: str) -> Path:

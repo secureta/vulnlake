@@ -12,9 +12,11 @@ from pathlib import Path
 import duckdb
 
 
-def _q(s: str) -> str:
+def _sql_literal(s: str) -> str:
     """SQL 文字列リテラル用エスケープ。"""
-    return s.replace("'", "''")
+    if "\x00" in s:
+        raise ValueError("SQL 文字列リテラルに NUL 文字は使用できません")
+    return "'" + s.replace("'", "''") + "'"
 
 
 class Lake:
@@ -23,13 +25,17 @@ class Lake:
 
     def __init__(self, catalog_path: Path, data_path: str | None = None):
         self._closed = False
+        self.META = f"__ducklake_metadata_{self.ALIAS}"
         self.con = duckdb.connect()
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
-        options = f" (DATA_PATH '{_q(data_path)}')" if data_path else ""
-        self.con.execute(
-            f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}"
+        attach = (
+            f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS {self.ALIAS}"
         )
+        if data_path:
+            attach += " (DATA_PATH ?)"
+        (statement,) = self.con.extract_statements(attach)
+        self.con.execute(statement, [data_path] if data_path else None)
 
     def ensure_tables(self) -> None:
         self.con.execute(
@@ -231,7 +237,6 @@ class Lake:
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
             rows = self.con.execute(
-                # META はクラス定数の固定識別子で外部入力は入らない
                 f"SELECT path FROM {self.META}.ducklake_data_file WHERE end_snapshot IS NULL"  # noqa: S608
             ).fetchall()
         else:
@@ -766,11 +771,10 @@ class Lake:
             "disclaimer",
         )
         values = ", ".join(
-            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")"
+            "(" + ", ".join(_sql_literal(str(info[c])) for c in cols) + ")"
             for info in infos
         )
         self.con.execute(
-            # ALIAS/cols は固定、values は _q() でエスケープ済み
             f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "  # noqa: S608
             f"SELECT * FROM (VALUES {values}) AS t({', '.join(cols)})"
         )
