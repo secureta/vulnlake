@@ -218,7 +218,9 @@ FROM read_parquet('https://vlake.reta.work/epss/year=2026/*.parquet');
 ```python
 import polars as pl
 
-scores = pl.read_parquet("https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet")
+scores = pl.read_parquet(
+    "https://vlake.reta.work/epss/year=2026/epss-2026-07-10.parquet"
+)
 ```
 
 ## For LLMs and agents

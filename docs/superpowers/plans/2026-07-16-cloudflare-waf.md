@@ -98,7 +98,7 @@ def test_extract_identifiers_supports_multiple_vulnerability_id_types():
 
 
 def test_parse_current_changelog_mdx_extracts_frontmatter_and_context():
-    raw = b'''---
+    raw = b"""---
 title: "WAF Release - 2026-03-12 - Emergency"
 description: Cloudflare WAF managed rulesets emergency release
 date: 2026-03-12
@@ -109,7 +109,7 @@ import { RuleID } from "~/components";
 This release adds detections for Ivanti EPMM (CVE-2026-1281 and CVE-2026-1340).
 
 <td>Ivanti EPMM - Code Injection - CVE:CVE-2026-1281 CVE:CVE-2026-1340</td>
-'''
+"""
 
     rows = cloudflare_waf.parse_markdown(
         "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx", raw
@@ -123,14 +123,13 @@ This release adds detections for Ivanti EPMM (CVE-2026-1281 and CVE-2026-1340).
     assert rows[0]["source_title"] == "WAF Release - 2026-03-12 - Emergency"
     assert rows[0]["source_date"] == date(2026, 3, 12)
     assert rows[0]["source_url"] == (
-        "https://developers.cloudflare.com/changelog/"
-        "2026-03-12-emergency-waf-release/"
+        "https://developers.cloudflare.com/changelog/2026-03-12-emergency-waf-release/"
     )
     assert "CVE-2026-1281" in rows[0]["matched_text"]
 
 
 def test_parse_historical_table_uses_row_description_and_change_date():
-    raw = b'''---
+    raw = b"""---
 title: "Historical (2024)"
 ---
 <table><tbody>
@@ -144,7 +143,7 @@ title: "Historical (2024)"
 <td>Block</td>
 </tr>
 </tbody></table>
-'''
+"""
 
     rows = cloudflare_waf.parse_markdown(
         "src/content/docs/waf/change-log/historical-2024.mdx", raw
@@ -164,15 +163,22 @@ title: "Historical (2024)"
 
 
 def test_parse_dir_deduplicates_identifier_per_source_url(tmp_path):
-    p = tmp_path / "src" / "content" / "changelog" / "waf" / "2026-01-01-waf-release.mdx"
+    p = (
+        tmp_path
+        / "src"
+        / "content"
+        / "changelog"
+        / "waf"
+        / "2026-01-01-waf-release.mdx"
+    )
     p.parent.mkdir(parents=True)
     p.write_text(
-        '''---
+        """---
 title: WAF Release
 date: 2026-01-01
 ---
 CVE-2026-0001 appears twice: CVE:CVE-2026-0001.
-'''
+"""
     )
 
     rows = cloudflare_waf.parse_dir(tmp_path)
@@ -224,8 +230,7 @@ def test_rows_to_table_key_and_parquet_roundtrip(tmp_path):
         "GHSA-ABCD-1234-WXYZ",
     ]
     assert cloudflare_waf.key_for_update(date(2026, 7, 16)) == (
-        "cloudflare_waf/updates/year=2026/"
-        "cloudflare-waf-updates-2026-07-16.parquet"
+        "cloudflare_waf/updates/year=2026/cloudflare-waf-updates-2026-07-16.parquet"
     )
 
     out = tmp_path / "rows.parquet"
@@ -572,7 +577,6 @@ git commit -m "feat: Cloudflare WAFデータセットモジュールを追加"
 In `tests/test_lake.py`, add this test after `test_kev_latest_rows_and_view`:
 
 ```python
-
 def test_cloudflare_waf_latest_rows_and_view(tmp_path):
     lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
     try:
@@ -596,12 +600,21 @@ def test_cloudflare_waf_latest_rows_and_view(tmp_path):
             (r["identifier"], r["source_url"]): r
             for r in lake.cloudflare_waf_latest_rows()
         }
-        assert rows[("CVE-2026-0001", "https://developers.cloudflare.com/changelog/a/")][
-            "source_title"
-        ] == "new"
-        assert rows[("GHSA-ABCD-1234-WXYZ", "https://developers.cloudflare.com/changelog/b/")][
-            "removed"
-        ] is True
+        assert (
+            rows[("CVE-2026-0001", "https://developers.cloudflare.com/changelog/a/")][
+                "source_title"
+            ]
+            == "new"
+        )
+        assert (
+            rows[
+                (
+                    "GHSA-ABCD-1234-WXYZ",
+                    "https://developers.cloudflare.com/changelog/b/",
+                )
+            ]["removed"]
+            is True
+        )
 
         lake.refresh_cloudflare_waf_view()
         got = lake.query(
@@ -740,26 +753,27 @@ In `Lake.ensure_tables()`, add this DDL after the `kev_history` block and before
 After `refresh_kev_view()`, add:
 
 ```python
-    def cloudflare_waf_latest_rows(self) -> list[dict]:
-        """identifier + source_url ごと fetched_date 最新の1行を列名付き dict で返す。"""
-        cur = self.con.execute(
-            # ALIAS はクラス定数の固定識別子で外部入力は入らない
-            f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "  # noqa: S608
-            f"QUALIFY row_number() OVER "
-            f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
-        )
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+def cloudflare_waf_latest_rows(self) -> list[dict]:
+    """identifier + source_url ごと fetched_date 最新の1行を列名付き dict で返す。"""
+    cur = self.con.execute(
+        # ALIAS はクラス定数の固定識別子で外部入力は入らない
+        f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "  # noqa: S608
+        f"QUALIFY row_number() OVER "
+        f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
+    )
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
-    def refresh_cloudflare_waf_view(self) -> None:
-        """identifier + source_url ごとに fetched_date 最新の1行を返す view。"""
-        self.con.execute(
-            # ALIAS はクラス定数の固定識別子で外部入力は入らない
-            f"CREATE OR REPLACE VIEW {self.ALIAS}.cloudflare_waf AS "  # noqa: S608
-            f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "
-            f"QUALIFY row_number() OVER "
-            f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
-        )
+
+def refresh_cloudflare_waf_view(self) -> None:
+    """identifier + source_url ごとに fetched_date 最新の1行を返す view。"""
+    self.con.execute(
+        # ALIAS はクラス定数の固定識別子で外部入力は入らない
+        f"CREATE OR REPLACE VIEW {self.ALIAS}.cloudflare_waf AS "  # noqa: S608
+        f"SELECT * FROM {self.ALIAS}.cloudflare_waf_history "
+        f"QUALIFY row_number() OVER "
+        f"(PARTITION BY identifier, source_url ORDER BY fetched_date DESC) = 1"
+    )
 ```
 
 - [ ] **Step 4: Update `refresh_cve_sources_view()`**
@@ -910,18 +924,18 @@ def _patch_download(monkeypatch, files: dict[str, str]):
 
 def _initial_files():
     return {
-        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release - 2026-03-12 - Emergency"
 date: 2026-03-12
 ---
 This release adds detections for CVE-2026-1281 and CVE-2026-1340.
-''',
-        "src/content/changelog/waf/2026-04-01-waf-release.mdx": '''---
+""",
+        "src/content/changelog/waf/2026-04-01-waf-release.mdx": """---
 title: "WAF Release - 2026-04-01"
 date: 2026-04-01
 ---
 This release mentions GHSA-abcd-1234-wxyz.
-''',
+""",
     }
 
 
@@ -949,10 +963,13 @@ def test_update_cloudflare_waf_initial_full_load(cfg, monkeypatch):
         ).fetchone()[0]
         == 3
     )
-    assert con.execute(
-        "SELECT source_title FROM frozen.cloudflare_waf "
-        "WHERE identifier = 'CVE-2026-1281' AND NOT removed"
-    ).fetchone()[0] == "WAF Release - 2026-03-12 - Emergency"
+    assert (
+        con.execute(
+            "SELECT source_title FROM frozen.cloudflare_waf "
+            "WHERE identifier = 'CVE-2026-1281' AND NOT removed"
+        ).fetchone()[0]
+        == "WAF Release - 2026-03-12 - Emergency"
+    )
     names = {r[0] for r in con.execute("SELECT name FROM frozen.datasets").fetchall()}
     assert names == {
         "epss",
@@ -980,18 +997,18 @@ def test_update_cloudflare_waf_diff_tombstone_and_revival(cfg, monkeypatch):
     pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 16))
 
     changed = {
-        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release - 2026-03-12 - Emergency Updated"
 date: 2026-03-12
 ---
 Updated context for CVE-2026-1281 only.
-''',
-        "src/content/changelog/waf/2026-05-01-waf-release.mdx": '''---
+""",
+        "src/content/changelog/waf/2026-05-01-waf-release.mdx": """---
 title: "WAF Release - 2026-05-01"
 date: 2026-05-01
 ---
 New detection for CVE-2026-9999.
-''',
+""",
     }
     _patch_download(monkeypatch, changed)
 
@@ -1000,22 +1017,27 @@ New detection for CVE-2026-9999.
 
     con = _attach(cfg)
     removed = con.execute(
-        "SELECT removed FROM frozen.cloudflare_waf "
-        "WHERE identifier = 'CVE-2026-1340'"
+        "SELECT removed FROM frozen.cloudflare_waf WHERE identifier = 'CVE-2026-1340'"
     ).fetchone()[0]
     assert removed is True
-    assert con.execute(
-        "SELECT source_title FROM frozen.cloudflare_waf "
-        "WHERE identifier = 'CVE-2026-1281'"
-    ).fetchone()[0] == "WAF Release - 2026-03-12 - Emergency Updated"
+    assert (
+        con.execute(
+            "SELECT source_title FROM frozen.cloudflare_waf "
+            "WHERE identifier = 'CVE-2026-1281'"
+        ).fetchone()[0]
+        == "WAF Release - 2026-03-12 - Emergency Updated"
+    )
 
     _patch_download(monkeypatch, _initial_files())
     msg = pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 18))
     assert msg == "published 2026-07-18 (4 records)"
-    assert con.execute(
-        "SELECT removed FROM frozen.cloudflare_waf "
-        "WHERE identifier = 'CVE-2026-1340'"
-    ).fetchone()[0] is False
+    assert (
+        con.execute(
+            "SELECT removed FROM frozen.cloudflare_waf "
+            "WHERE identifier = 'CVE-2026-1340'"
+        ).fetchone()[0]
+        is False
+    )
 
 
 def test_update_cloudflare_waf_refuses_empty_snapshot(cfg, monkeypatch):
@@ -1032,12 +1054,12 @@ def test_update_cloudflare_waf_refuses_shrunken_snapshot(cfg, monkeypatch):
     _patch_download(
         monkeypatch,
         {
-            "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+            "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release"
 date: 2026-03-12
 ---
 Only CVE-2026-1281 remains.
-'''
+"""
         },
     )
     with pytest.raises(RuntimeError, match="less than half"):
@@ -1300,7 +1322,6 @@ If `rg` found other existing tests that needed dataset assertion updates, includ
 Append to `tests/test_cli.py` near the other update CLI tests:
 
 ```python
-
 def test_update_cloudflare_waf_via_cli(monkeypatch, tmp_path):
     monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
     monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
@@ -1349,9 +1370,11 @@ Expected: FAIL because `click.Choice` rejects `cloudflare_waf` for update.
 Change the update `click.Choice` list to include `cloudflare_waf`:
 
 ```python
-    type=click.Choice(
+type = (
+    click.Choice(
         ["epss", "cve", "ghsa", "exploitdb", "nuclei", "cwe", "kev", "cloudflare_waf"]
     ),
+)
 ```
 
 Change the update docstring to mention Cloudflare WAF:

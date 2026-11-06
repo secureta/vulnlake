@@ -357,99 +357,101 @@ Expected: FAIL with `AttributeError: 'Lake' object has no attribute 'refresh_cve
 Insert this block immediately after `refresh_cve_view()`:
 
 ```python
-    def _refresh_cve_ssvc_view(self, source: str, target: str) -> None:
-        """CVE JSON 5.x raw から CISA Coordinator SSVC を抽出する view を作る。"""
-        self.con.execute(
-            # ALIAS はクラス定数、source/target は呼び出し側の固定文字列
-            f"""CREATE OR REPLACE VIEW {self.ALIAS}.{target} AS
-            WITH
-            ssvc_metrics AS (
-                SELECT
-                    src.cve,
-                    src.date_updated,
-                    json_extract_string(metric, '$.other.content.version') AS ssvc_version,
-                    json_extract_string(metric, '$.other.content.role') AS ssvc_role,
-                    try_cast(
-                        json_extract_string(metric, '$.other.content.timestamp') AS TIMESTAMP
-                    ) AS ssvc_timestamp,
-                    coalesce(
-                        json_extract_string(adp, '$.title'),
-                        json_extract_string(adp, '$.providerMetadata.shortName')
-                    ) AS ssvc_provider,
-                    lower(json_extract_string(metric, '$.other.content.decision'))
-                        AS recorded_decision,
-                    cast(metric AS VARCHAR) AS ssvc_raw,
-                    metric
-                FROM {self.ALIAS}.{source} AS src
-                JOIN UNNEST(
-                    coalesce(json_extract(src.raw, '$.containers.adp')::JSON[], []::JSON[])
-                ) AS adp_items(adp) ON true
-                JOIN UNNEST(
-                    coalesce(json_extract(adp, '$.metrics')::JSON[], []::JSON[])
-                ) AS metric_items(metric) ON true
-                WHERE (
-                    json_extract_string(adp, '$.title') = 'CISA ADP Vulnrichment'
-                    OR json_extract_string(adp, '$.providerMetadata.shortName') = 'CISA-ADP'
-                )
-                  AND lower(json_extract_string(metric, '$.other.type')) = 'ssvc'
-                  AND json_extract_string(metric, '$.other.content.role') = 'CISA Coordinator'
-            ),
-            expanded_options AS (
-                SELECT ssvc_metrics.*, opt
-                FROM ssvc_metrics
-                LEFT JOIN UNNEST(
-                    coalesce(
-                        json_extract(metric, '$.other.content.options')::JSON[],
-                        []::JSON[]
-                    )
-                ) AS option_items(opt) ON true
-            )
+def _refresh_cve_ssvc_view(self, source: str, target: str) -> None:
+    """CVE JSON 5.x raw から CISA Coordinator SSVC を抽出する view を作る。"""
+    self.con.execute(
+        # ALIAS はクラス定数、source/target は呼び出し側の固定文字列
+        f"""CREATE OR REPLACE VIEW {self.ALIAS}.{target} AS
+        WITH
+        ssvc_metrics AS (
             SELECT
-                cve,
-                date_updated,
-                ssvc_version,
-                ssvc_role,
-                ssvc_timestamp,
-                ssvc_provider,
-                max(
-                    CASE WHEN json_extract_string(opt, '$.Exploitation') IS NOT NULL
-                    THEN lower(json_extract_string(opt, '$.Exploitation')) END
-                ) AS exploitation,
-                max(
-                    CASE WHEN json_extract_string(opt, '$.Automatable') IS NOT NULL
-                    THEN lower(json_extract_string(opt, '$.Automatable')) END
-                ) AS automatable,
-                max(
-                    CASE WHEN json_extract_string(opt, '$.Technical Impact') IS NOT NULL
-                    THEN lower(json_extract_string(opt, '$.Technical Impact')) END
-                ) AS technical_impact,
-                max(
-                    CASE
-                    WHEN json_extract_string(opt, '$."Mission and Well-Being Impact"') IS NOT NULL
-                    THEN lower(json_extract_string(opt, '$."Mission and Well-Being Impact"'))
-                    END
-                ) AS mission_impact,
-                recorded_decision,
-                ssvc_raw
-            FROM expanded_options
-            GROUP BY
-                cve,
-                date_updated,
-                ssvc_version,
-                ssvc_role,
-                ssvc_timestamp,
-                ssvc_provider,
-                recorded_decision,
-                ssvc_raw"""  # noqa: S608
+                src.cve,
+                src.date_updated,
+                json_extract_string(metric, '$.other.content.version') AS ssvc_version,
+                json_extract_string(metric, '$.other.content.role') AS ssvc_role,
+                try_cast(
+                    json_extract_string(metric, '$.other.content.timestamp') AS TIMESTAMP
+                ) AS ssvc_timestamp,
+                coalesce(
+                    json_extract_string(adp, '$.title'),
+                    json_extract_string(adp, '$.providerMetadata.shortName')
+                ) AS ssvc_provider,
+                lower(json_extract_string(metric, '$.other.content.decision'))
+                    AS recorded_decision,
+                cast(metric AS VARCHAR) AS ssvc_raw,
+                metric
+            FROM {self.ALIAS}.{source} AS src
+            JOIN UNNEST(
+                coalesce(json_extract(src.raw, '$.containers.adp')::JSON[], []::JSON[])
+            ) AS adp_items(adp) ON true
+            JOIN UNNEST(
+                coalesce(json_extract(adp, '$.metrics')::JSON[], []::JSON[])
+            ) AS metric_items(metric) ON true
+            WHERE (
+                json_extract_string(adp, '$.title') = 'CISA ADP Vulnrichment'
+                OR json_extract_string(adp, '$.providerMetadata.shortName') = 'CISA-ADP'
+            )
+              AND lower(json_extract_string(metric, '$.other.type')) = 'ssvc'
+              AND json_extract_string(metric, '$.other.content.role') = 'CISA Coordinator'
+        ),
+        expanded_options AS (
+            SELECT ssvc_metrics.*, opt
+            FROM ssvc_metrics
+            LEFT JOIN UNNEST(
+                coalesce(
+                    json_extract(metric, '$.other.content.options')::JSON[],
+                    []::JSON[]
+                )
+            ) AS option_items(opt) ON true
         )
+        SELECT
+            cve,
+            date_updated,
+            ssvc_version,
+            ssvc_role,
+            ssvc_timestamp,
+            ssvc_provider,
+            max(
+                CASE WHEN json_extract_string(opt, '$.Exploitation') IS NOT NULL
+                THEN lower(json_extract_string(opt, '$.Exploitation')) END
+            ) AS exploitation,
+            max(
+                CASE WHEN json_extract_string(opt, '$.Automatable') IS NOT NULL
+                THEN lower(json_extract_string(opt, '$.Automatable')) END
+            ) AS automatable,
+            max(
+                CASE WHEN json_extract_string(opt, '$.Technical Impact') IS NOT NULL
+                THEN lower(json_extract_string(opt, '$.Technical Impact')) END
+            ) AS technical_impact,
+            max(
+                CASE
+                WHEN json_extract_string(opt, '$."Mission and Well-Being Impact"') IS NOT NULL
+                THEN lower(json_extract_string(opt, '$."Mission and Well-Being Impact"'))
+                END
+            ) AS mission_impact,
+            recorded_decision,
+            ssvc_raw
+        FROM expanded_options
+        GROUP BY
+            cve,
+            date_updated,
+            ssvc_version,
+            ssvc_role,
+            ssvc_timestamp,
+            ssvc_provider,
+            recorded_decision,
+            ssvc_raw"""  # noqa: S608
+    )
 
-    def refresh_cve_ssvc_history_view(self) -> None:
-        """cve_history から CISA Coordinator SSVC 履歴を抽出する view。"""
-        self._refresh_cve_ssvc_view("cve_history", "cve_ssvc_history")
 
-    def refresh_cve_ssvc_view(self) -> None:
-        """最新 cve view から CISA Coordinator SSVC を抽出する view。"""
-        self._refresh_cve_ssvc_view("cve", "cve_ssvc")
+def refresh_cve_ssvc_history_view(self) -> None:
+    """cve_history から CISA Coordinator SSVC 履歴を抽出する view。"""
+    self._refresh_cve_ssvc_view("cve_history", "cve_ssvc_history")
+
+
+def refresh_cve_ssvc_view(self) -> None:
+    """最新 cve view から CISA Coordinator SSVC を抽出する view。"""
+    self._refresh_cve_ssvc_view("cve", "cve_ssvc")
 ```
 
 - [ ] **Step 5: `src/vlake/lake.py` に `refresh_ssvc_decision_view()` を追加**
