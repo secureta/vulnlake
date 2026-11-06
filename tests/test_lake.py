@@ -454,12 +454,20 @@ def test_attach_paths_with_sql_syntax(tmp_path):
     lake = Lake(catalog, data_path=data_path)
     try:
         lake.ensure_tables()
+        assert lake.query(
+            "SELECT value FROM __ducklake_metadata_lake.ducklake_metadata "
+            "WHERE key = 'data_path'"
+        ) == [(data_path + "/",)]
         assert lake.query("SELECT count(*) FROM lake.epss") == [(0,)]
     finally:
         lake.close()
 
     lake = Lake(catalog)
     try:
+        assert lake.query(
+            "SELECT value FROM __ducklake_metadata_lake.ducklake_metadata "
+            "WHERE key = 'data_path'"
+        ) == [(data_path + "/",)]
         assert lake.query("SELECT count(*) FROM lake.epss") == [(0,)]
     finally:
         lake.close()
