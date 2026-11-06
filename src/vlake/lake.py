@@ -12,9 +12,11 @@ from pathlib import Path
 import duckdb
 
 
-def _q(s: str) -> str:
+def _sql_literal(s: str) -> str:
     """SQL 文字列リテラル用エスケープ。"""
-    return s.replace("'", "''")
+    if "\x00" in s:
+        raise ValueError("SQL 文字列リテラルに NUL 文字は使用できません")
+    return "'" + s.replace("'", "''") + "'"
 
 
 class Lake:
@@ -26,10 +28,11 @@ class Lake:
         self.con = duckdb.connect()
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
-        options = f" (DATA_PATH '{_q(data_path)}')" if data_path else ""
-        self.con.execute(
-            f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}"
-        )
+        attach = f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS lake"
+        if data_path:
+            self.con.execute(attach + " (DATA_PATH ?)", [data_path])
+        else:
+            self.con.execute(attach)
 
     def ensure_tables(self) -> None:
         self.con.execute(
@@ -766,11 +769,10 @@ class Lake:
             "disclaimer",
         )
         values = ", ".join(
-            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")"
+            "(" + ", ".join(_sql_literal(str(info[c])) for c in cols) + ")"
             for info in infos
         )
         self.con.execute(
-            # ALIAS/cols は固定、values は _q() でエスケープ済み
             f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "  # noqa: S608
             f"SELECT * FROM (VALUES {values}) AS t({', '.join(cols)})"
         )
