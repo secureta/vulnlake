@@ -334,6 +334,10 @@ rewriting the external Parquet files. If conversion or format validation fails,
 the previous published catalog remains unchanged. DuckLake 1.1-only features
 are not enabled.
 
+Writers targeting the same storage location must be serialized. The bundled
+publish and backfill workflows share a concurrency group; custom schedulers
+must provide equivalent mutual exclusion.
+
 ### GitHub Actions
 
 This repository includes workflows for daily publishing and manual backfills.

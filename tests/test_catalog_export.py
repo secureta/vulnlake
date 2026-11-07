@@ -20,8 +20,12 @@ def _catalog(path):
         lake.close()
 
 
-def test_export_preserves_source_and_uses_legacy_storage(tmp_path):
-    source = tmp_path / "working's catalog.ducklake"
+@pytest.mark.parametrize(
+    "name",
+    ["working's catalog.ducklake", "catalog'; CREATE TABLE injected(i INT); --"],
+)
+def test_export_preserves_source_and_uses_legacy_storage(tmp_path, name):
+    source = tmp_path / name
     destination = tmp_path / "public's catalog.ducklake"
     _catalog(source)
     before = source.read_bytes()
@@ -35,6 +39,9 @@ def test_export_preserves_source_and_uses_legacy_storage(tmp_path):
         assert con.execute(
             "SELECT value FROM ducklake_metadata WHERE key = 'version'"
         ).fetchall() == [("1.0",)]
+        assert con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'injected'"
+        ).fetchone() == (0,)
     assert set(tmp_path.iterdir()) == {source, destination}
 
 
@@ -81,10 +88,10 @@ def test_export_copy_failure_leaves_destination_untouched(tmp_path, monkeypatch)
         def __exit__(self, *args):
             self.con.close()
 
-        def execute(self, query):
+        def execute(self, query, parameters=None):
             if query == "COPY FROM DATABASE src TO dst":
                 raise duckdb.IOException("injected copy failure")
-            return self.con.execute(query)
+            return self.con.execute(query, parameters)
 
     monkeypatch.setattr(duckdb, "connect", FailingConnection)
     with pytest.raises(duckdb.IOException, match="injected copy failure"):
@@ -158,10 +165,10 @@ def test_export_rejects_unexpected_storage_version(tmp_path, monkeypatch):
         def __exit__(self, *args):
             self.con.close()
 
-        def execute(self, query):
+        def execute(self, query, parameters=None):
             if query.startswith("SELECT tags['storage_version']"):
                 return self.con.execute("SELECT 'v2.0.0+'")
-            return self.con.execute(query)
+            return self.con.execute(query, parameters)
 
     monkeypatch.setattr(duckdb, "connect", InvalidStorageConnection)
     with pytest.raises(ValueError, match="ストレージ形式"):

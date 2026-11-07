@@ -26,17 +26,15 @@ def export_compatible_catalog(source: Path, destination: Path) -> None:
     with TemporaryDirectory(dir=destination.parent) as td:
         output = Path(td) / "vlake.ducklake"
         with duckdb.connect() as con:
-            con.execute(
-                f"ATTACH {_sql_literal(str(source))} AS src (TYPE duckdb, READ_ONLY)"
-            )
+            con.execute("ATTACH ? AS src (TYPE duckdb, READ_ONLY)", [str(source)])
             version = con.execute(
                 "SELECT value FROM src.ducklake_metadata WHERE key = 'version'"
             ).fetchall()
             if version != [("1.0",)]:
                 raise ValueError("公開できる DuckLake カタログ仕様は 1.0 のみです")
             con.execute(
-                f"ATTACH {_sql_literal(str(output))} AS dst "
-                "(TYPE duckdb, STORAGE_VERSION 'v1.5.0')"
+                "ATTACH ? AS dst (TYPE duckdb, STORAGE_VERSION 'v1.5.0')",
+                [str(output)],
             )
             con.execute("COPY FROM DATABASE src TO dst")
             storage_version = con.execute(
