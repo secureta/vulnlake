@@ -505,7 +505,7 @@ def test_custom_lake_alias(tmp_path):
 
 def test_attach_rejects_multiple_statements(tmp_path, monkeypatch):
     class InvalidLake(Lake):
-        ALIAS = "custom_lake; SELECT 42"
+        ALIAS = "custom_lake; SELECT 42; --"
 
     con = duckdb.connect()
     monkeypatch.setattr(duckdb, "connect", lambda: con)
