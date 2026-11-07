@@ -331,8 +331,9 @@ separate DuckDB file with `STORAGE_VERSION 'v1.5.0'`. Only this compatibility co
 is uploaded, so readers can continue using DuckDB 1.5.2 or newer at the same URL.
 The copy preserves registered Parquet paths and snapshot history without
 rewriting the external Parquet files. If conversion or format validation fails,
-the previous published catalog remains unchanged. DuckLake 1.1-only features
-are not enabled.
+the previous published catalog remains unchanged. Local storage also stages
+each upload before atomically replacing its destination, so a copy failure does
+not truncate the published catalog. DuckLake 1.1-only features are not enabled.
 
 Writers targeting the same storage location must be serialized. The bundled
 publish and backfill workflows share a concurrency group; custom schedulers

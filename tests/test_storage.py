@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+from vlake import storage
 from vlake.config import Config
 from vlake.storage import LocalStorage, make_storage
 
@@ -37,6 +40,61 @@ def test_local_list_and_url(tmp_path):
     assert st.url("epss/year=2021/a.parquet") == str(
         (root / "epss/year=2021/a.parquet").resolve()
     )
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_local_put_copy_failure_preserves_published_file(
+    tmp_path, monkeypatch, existing
+):
+    root = tmp_path / "bucket"
+    root.mkdir()
+    st = LocalStorage(root)
+    destination = root / "vlake.ducklake"
+    if existing:
+        destination.write_bytes(b"previous catalog")
+    source = tmp_path / "source.ducklake"
+    source.write_bytes(b"new catalog")
+
+    def fail_copy(src, dest):
+        Path(dest).write_bytes(b"partial")
+        assert destination.exists() == existing
+        if existing:
+            assert destination.read_bytes() == b"previous catalog"
+        raise OSError("injected upload failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(storage.shutil, "copyfile", fail_copy)
+        with pytest.raises(OSError, match="injected upload failure"):
+            st.put(source, "vlake.ducklake")
+    assert destination.exists() == existing
+    if existing:
+        assert destination.read_bytes() == b"previous catalog"
+    assert set(root.iterdir()) == ({destination} if existing else set())
+    st.put(source, "vlake.ducklake")
+    assert destination.read_bytes() == b"new catalog"
+    assert list(root.iterdir()) == [destination]
+
+
+def test_local_put_replaces_only_after_copy_completes(tmp_path, monkeypatch):
+    root = tmp_path / "bucket"
+    root.mkdir()
+    st = LocalStorage(root)
+    destination = root / "vlake.ducklake"
+    destination.write_bytes(b"previous catalog")
+    source = tmp_path / "source.ducklake"
+    source.write_bytes(b"new catalog")
+    copyfile = storage.shutil.copyfile
+
+    def observe_copy(src, dest):
+        assert Path(dest) != destination
+        result = copyfile(src, dest)
+        assert destination.read_bytes() == b"previous catalog"
+        return result
+
+    monkeypatch.setattr(storage.shutil, "copyfile", observe_copy)
+    st.put(source, "vlake.ducklake")
+    assert destination.read_bytes() == b"new catalog"
+    assert list(root.iterdir()) == [destination]
 
 
 def test_make_storage_local(tmp_path):
