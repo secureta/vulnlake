@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import duckdb
 
@@ -17,6 +18,32 @@ def _sql_literal(s: str) -> str:
     if "\x00" in s:
         raise ValueError("SQL 文字列リテラルに NUL 文字は使用できません")
     return "'" + s.replace("'", "''") + "'"
+
+
+def export_compatible_catalog(source: Path, destination: Path) -> None:
+    if source.resolve() == destination.resolve():
+        raise ValueError("作業用カタログと公開用カタログは別ファイルにしてください")
+    with TemporaryDirectory(dir=destination.parent) as td:
+        output = Path(td) / "vlake.ducklake"
+        with duckdb.connect() as con:
+            con.execute("ATTACH ? AS src (TYPE duckdb, READ_ONLY)", [str(source)])
+            version = con.execute(
+                "SELECT value FROM src.ducklake_metadata WHERE key = 'version'"
+            ).fetchall()
+            if version != [("1.0",)]:
+                raise ValueError("公開できる DuckLake カタログ仕様は 1.0 のみです")
+            con.execute(
+                "ATTACH ? AS dst (TYPE duckdb, STORAGE_VERSION 'v1.5.0')",
+                [str(output)],
+            )
+            con.execute("COPY FROM DATABASE src TO dst")
+            storage_version = con.execute(
+                "SELECT tags['storage_version'] FROM duckdb_databases() "
+                "WHERE database_name = 'dst'"
+            ).fetchone()[0]
+            if storage_version != "v1.5.0+":
+                raise ValueError("公開用カタログの DuckDB ストレージ形式が不正です")
+        output.replace(destination)
 
 
 class Lake:
@@ -31,9 +58,11 @@ class Lake:
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
         attach = (
             f"ATTACH {_sql_literal('ducklake:' + str(catalog_path))} AS {self.ALIAS}"
+            " (DUCKLAKE_VERSION '1.0'"
         )
         if data_path:
-            attach += " (DATA_PATH ?)"
+            attach += ", DATA_PATH ?"
+        attach += ")"
         (statement,) = self.con.extract_statements(attach)
         self.con.execute(statement, [data_path] if data_path else None)
 

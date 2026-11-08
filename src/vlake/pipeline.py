@@ -16,7 +16,7 @@ import duckdb
 
 from . import cloudflare_waf, cvelist, cwe, epss, exploitdb, ghsa, kev, mitre, nuclei
 from .config import Config
-from .lake import Lake
+from .lake import Lake, export_compatible_catalog
 from .storage import Storage, make_storage
 
 CATALOG_KEY = "vlake.ducklake"
@@ -96,7 +96,9 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_cve_sources_view()
     lake.refresh_cwe_attack_patterns_view()
     lake.close()
-    storage.put(catalog, CATALOG_KEY)
+    compatible = catalog.with_name("compatible.ducklake")
+    export_compatible_catalog(catalog, compatible)
+    storage.put(compatible, CATALOG_KEY)
 
 
 def _ingest_day(

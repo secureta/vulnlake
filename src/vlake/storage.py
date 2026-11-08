@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Protocol
 
 from .config import Config
@@ -27,7 +28,10 @@ class LocalStorage:
     def put(self, local_path: Path, key: str) -> None:
         dest = self._path(key)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(local_path, dest)
+        with TemporaryDirectory(dir=dest.parent) as td:
+            staged = Path(td) / "upload"
+            shutil.copyfile(local_path, staged)
+            staged.replace(dest)
 
     def get(self, key: str, local_path: Path) -> bool:
         src = self._path(key)

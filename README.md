@@ -325,6 +325,20 @@ first, and the DuckLake catalog (`vlake.ducklake`) is replaced last. If a run
 fails before the catalog is published, consumers keep seeing the previous stable
 catalog; rerunning is safe and idempotent.
 
+The publisher uses DuckDB 2.x while keeping the DuckLake catalog format at 1.0.
+Before publishing, it closes the working catalog and copies its metadata into a
+separate DuckDB file with `STORAGE_VERSION 'v1.5.0'`. Only this compatibility copy
+is uploaded, so readers can continue using DuckDB 1.5.2 or newer at the same URL.
+The copy preserves registered Parquet paths and snapshot history without
+rewriting the external Parquet files. If conversion or format validation fails,
+the previous published catalog remains unchanged. Local storage also stages
+each upload before atomically replacing its destination, so a copy failure does
+not truncate the published catalog. DuckLake 1.1-only features are not enabled.
+
+Writers targeting the same storage location must be serialized. The bundled
+publish and backfill workflows share a concurrency group; custom schedulers
+must provide equivalent mutual exclusion.
+
 ### GitHub Actions
 
 This repository includes workflows for daily publishing and manual backfills.
@@ -382,3 +396,15 @@ uv run ruff check .
 uv run ruff format . --check
 uv run zizmor .github/workflows/
 ```
+
+CI also tests published catalogs with isolated DuckDB 1.5.2 and 1.5.6 readers.
+To run the compatibility tests locally, create a separate Python environment
+containing one of those DuckDB versions and set `VLAKE_COMPAT_PYTHON` to its
+absolute Python executable path:
+
+```bash
+VLAKE_COMPAT_PYTHON=/absolute/path/to/reader/bin/python \
+  uv run pytest -v tests/test_catalog_compatibility.py
+```
+
+Without that variable, only the cross-version compatibility tests are skipped.
