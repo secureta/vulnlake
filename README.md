@@ -281,7 +281,10 @@ uv run vlake verify
 ### Publish to S3-compatible storage
 
 Configure a bucket and the public HTTPS URL where consumers will read the files.
-S3 mode rejects public URLs without the HTTPS scheme and a hostname.
+S3 mode requires a public HTTPS base URL with a hostname and a valid port, if
+specified. Embedded credentials, query strings, and fragments are rejected
+because the URL is published in catalog references and object keys are appended
+to it. The same validation applies when constructing S3 storage directly.
 Local-only mode does not validate `VLAKE_PUBLIC_URL`.
 
 ```bash

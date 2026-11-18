@@ -4,7 +4,7 @@ import pytest
 
 from vlake import storage
 from vlake.config import Config
-from vlake.storage import LocalStorage, make_storage
+from vlake.storage import LocalStorage, S3Storage, make_storage
 
 
 def test_local_roundtrip(tmp_path):
@@ -100,6 +100,54 @@ def test_local_put_replaces_only_after_copy_completes(tmp_path, monkeypatch):
 def test_make_storage_local(tmp_path):
     cfg = Config(s3_endpoint=None, s3_bucket=None, public_url=None, local_dir=tmp_path)
     assert isinstance(make_storage(cfg), LocalStorage)
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "http://data.example.com",
+        "https://user:secret@data.example.com",
+        "https://data.example.com:abc",
+        "https://data.example.com:65536",
+        "https://data.example.com?token=secret",
+        "https://data.example.com#data",
+    ],
+)
+@pytest.mark.parametrize("direct", [False, True])
+def test_s3_storage_rejects_invalid_public_url(public_url, direct):
+    with pytest.raises(ValueError, match="VLAKE_PUBLIC_URL.*HTTPS"):
+        if direct:
+            S3Storage("bucket", None, public_url)
+        else:
+            cfg = Config(
+                s3_endpoint=None,
+                s3_bucket="bucket",
+                public_url=public_url,
+                local_dir=None,
+            )
+            make_storage(cfg)
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://data.example.com",
+        "https://data.example.com:8443/datasets",
+        "https://[::1]:8443/datasets",
+    ],
+)
+def test_make_storage_s3_public_url(monkeypatch, public_url):
+    import boto3
+
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: object())
+    cfg = Config(
+        s3_endpoint=None, s3_bucket="bucket", public_url=public_url, local_dir=None
+    )
+    st = make_storage(cfg)
+    assert isinstance(st, S3Storage)
+    assert st.url("epss/year=2026/a.parquet") == (
+        f"{public_url}/epss/year=2026/a.parquet"
+    )
 
 
 def test_make_storage_missing_public_url():

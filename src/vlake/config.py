@@ -6,6 +6,27 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def validate_public_url(public_url: str) -> None:
+    try:
+        parsed = urlsplit(public_url)
+        valid = (
+            parsed.scheme == "https"
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and parsed.password is None
+            and (parsed.port is None or parsed.port > 0)
+            and "?" not in public_url
+            and "#" not in public_url
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError(
+            "VLAKE_PUBLIC_URL は認証情報・クエリ・フラグメントを含まない、"
+            "有効なホスト名とポートを持つ公開 HTTPS ベース URL にしてください"
+        )
+
+
 @dataclass(frozen=True)
 class Config:
     s3_endpoint: str | None
@@ -28,14 +49,9 @@ class Config:
             )
         if bucket:
             try:
-                parsed = urlsplit(public)
-                valid_public_url = parsed.scheme == "https" and bool(parsed.hostname)
-            except ValueError:
-                valid_public_url = False
-            if not valid_public_url:
-                raise SystemExit(
-                    "VLAKE_PUBLIC_URL はホスト名を含む公開 HTTPS ベース URL にしてください"
-                )
+                validate_public_url(public)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from None
         return cls(
             s3_endpoint=os.environ.get("VLAKE_S3_ENDPOINT"),
             s3_bucket=bucket,

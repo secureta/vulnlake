@@ -22,6 +22,8 @@ def test_from_env_local(monkeypatch, tmp_path):
         "https://data.example.com/",
         "https://data.example.com/datasets/",
         "HTTPS://data.example.com/",
+        "https://data.example.com:8443/datasets/",
+        "https://[::1]:8443/datasets/",
     ],
 )
 def test_from_env_s3(monkeypatch, public_url):
@@ -69,6 +71,17 @@ def test_from_env_s3_requires_public_url(monkeypatch, public_url):
         "https:///datasets",
         "https://:443/datasets",
         "https://[invalid/datasets",
+        "https://user:secret@data.example.com",
+        "https://user@data.example.com",
+        "https://@data.example.com",
+        "https://data.example.com:abc",
+        "https://data.example.com:65536",
+        "https://data.example.com:-1",
+        "https://data.example.com:0",
+        "https://data.example.com?token=secret",
+        "https://data.example.com#data",
+        "https://data.example.com?",
+        "https://data.example.com#",
     ],
 )
 @pytest.mark.parametrize("local", [False, True])
