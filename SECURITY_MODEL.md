@@ -11,7 +11,7 @@ vulnlake が外部の脆弱性データセットを取得し、Parquet と DuckL
 | --- | --- |
 | データ取り込み | 配布元の応答や CLI で指定された入力を信頼せず、パーサーで読み取る。<br>`src/vlake/cli.py` とデータセット別モジュール。 |
 | カタログ生成 | 取り込んだレコードを Parquet に変換し、DuckLake カタログに登録する。<br>`src/vlake/pipeline.py`、`src/vlake/lake.py`。 |
-| ストレージ・読者 | 公開処理の書き込み権限と読者の読み取りを分離する。<br>カタログのデータファイル参照は、ローカルモードでは絶対ファイルパス、S3 モードでは `VLAKE_PUBLIC_URL` を基にした公開 URL となる。<br>S3 モードでは HTTPS の利用を前提とするが、現行コードは URL スキームを検証しないため、HTTP を設定すると通信経路上での改ざんを防げない。<br>`src/vlake/config.py`、`src/vlake/storage.py`。 |
+| ストレージ・読者 | 公開処理の書き込み権限と読者の読み取りを分離する。<br>カタログのデータファイル参照は、ローカルモードでは絶対ファイルパス、S3 モードでは `VLAKE_PUBLIC_URL` を基にした公開 URL となる。<br>S3 モードでは設定読み込み時とストレージ生成時に、公開 URL の HTTPS スキーム、ホスト名の存在、指定されたポートの妥当性を検証し、空白・認証情報・クエリ・フラグメントを含む URL を拒否する。<br>既存カタログの HTTP 参照は自動では変更されないため、HTTPS URL に設定し直したうえで `vlake rebuild-catalog` を実行する必要がある。<br>`src/vlake/config.py`、`src/vlake/storage.py`。 |
 | CI・公開自動化 | リポジトリの変更、外部 Actions、依存関係がランナー上で実行される。<br>テストと、ストレージへの書き込み権限を持つ公開ジョブを区別する。<br>`.github/workflows/`。 |
 
 ## 保護対象と想定する脅威

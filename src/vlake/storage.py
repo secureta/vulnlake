@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Protocol
 
-from .config import Config
+from .config import Config, validate_public_url
 
 
 class Storage(Protocol):
@@ -58,6 +58,7 @@ class LocalStorage:
 
 class S3Storage:
     def __init__(self, bucket: str, endpoint: str | None, public_url: str):
+        validate_public_url(public_url)
         import boto3
 
         self.client = boto3.client("s3", endpoint_url=endpoint)
