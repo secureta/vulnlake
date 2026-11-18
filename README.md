@@ -280,7 +280,9 @@ uv run vlake verify
 
 ### Publish to S3-compatible storage
 
-Configure a bucket and the public URL where consumers will read the files:
+Configure a bucket and the public HTTPS URL where consumers will read the files.
+S3 mode rejects public URLs without the HTTPS scheme and a hostname.
+Local-only mode does not validate `VLAKE_PUBLIC_URL`.
 
 ```bash
 uv sync
@@ -350,7 +352,7 @@ To use them in a fork:
 
 | Name | Store as | Why |
 |---|---|---|
-| `VLAKE_PUBLIC_URL` | Environment variable | Public base URL baked into the catalog |
+| `VLAKE_PUBLIC_URL` | Environment variable | Public HTTPS base URL baked into the catalog (required in S3 mode) |
 | `VLAKE_S3_ENDPOINT` | Environment secret | S3/R2 endpoint may contain account details |
 | `VLAKE_S3_BUCKET` | Environment secret | Write target bucket |
 | `AWS_ACCESS_KEY_ID` | Environment secret | Credential |
@@ -362,8 +364,10 @@ edits on other branches cannot access publishing credentials.
 Notes:
 
 - Scheduled workflows are disabled by default on forks until you enable them.
-- `VLAKE_PUBLIC_URL` is stored inside the catalog. If you change domains later,
-  run `uv run vlake rebuild-catalog` so file paths point at the new URL.
+- `VLAKE_PUBLIC_URL` is stored inside the catalog. If you change domains or
+  migrate an existing HTTP URL to HTTPS, run `uv run vlake rebuild-catalog`
+  so file paths point at the new URL. Configuration validation does not rewrite
+  existing catalog references.
 - The manual **backfill** workflow shares the same concurrency group as daily
   publishing, so the two jobs do not update the catalog at the same time.
 

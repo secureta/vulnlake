@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,16 @@ class Config:
             raise SystemExit(
                 "VLAKE_PUBLIC_URL (カタログに焼き込む公開HTTPSベースURL) が必要です"
             )
+        if bucket:
+            try:
+                parsed = urlsplit(public)
+                valid_public_url = parsed.scheme == "https" and bool(parsed.hostname)
+            except ValueError:
+                valid_public_url = False
+            if not valid_public_url:
+                raise SystemExit(
+                    "VLAKE_PUBLIC_URL はホスト名を含む公開 HTTPS ベース URL にしてください"
+                )
         return cls(
             s3_endpoint=os.environ.get("VLAKE_S3_ENDPOINT"),
             s3_bucket=bucket,
