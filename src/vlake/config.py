@@ -12,6 +12,7 @@ def validate_public_url(public_url: str) -> None:
         valid = (
             parsed.scheme == "https"
             and bool(parsed.hostname)
+            and not any(char.isspace() for char in public_url)
             and parsed.username is None
             and parsed.password is None
             and (parsed.port is None or parsed.port > 0)
@@ -22,8 +23,8 @@ def validate_public_url(public_url: str) -> None:
         valid = False
     if not valid:
         raise ValueError(
-            "VLAKE_PUBLIC_URL は認証情報・クエリ・フラグメントを含まない、"
-            "有効なホスト名とポートを持つ公開 HTTPS ベース URL にしてください"
+            "VLAKE_PUBLIC_URL は空白・認証情報・クエリ・フラグメントを含まず、"
+            "ホスト名と妥当なポート（指定時）を持つ公開 HTTPS ベース URL にしてください"
         )
 
 

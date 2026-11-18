@@ -111,6 +111,9 @@ def test_make_storage_local(tmp_path):
         "https://data.example.com:65536",
         "https://data.example.com?token=secret",
         "https://data.example.com#data",
+        "https://data example.com",
+        "https://data\texample.com",
+        "https://data\nexample.com",
     ],
 )
 @pytest.mark.parametrize("direct", [False, True])
@@ -134,6 +137,7 @@ def test_s3_storage_rejects_invalid_public_url(public_url, direct):
         "https://data.example.com",
         "https://data.example.com:8443/datasets",
         "https://[::1]:8443/datasets",
+        "https://data.example.com/data%20sets",
     ],
 )
 def test_make_storage_s3_public_url(monkeypatch, public_url):
