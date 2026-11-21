@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: publish  # Secrets/Variables はこの Environment に置く (ブランチ保護付き)
     env:
       VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
