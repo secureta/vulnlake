@@ -5,14 +5,14 @@
     "helpers:pinGitHubActionDigests"
   ],
   "timezone": "Asia/Tokyo",
-  "schedule": ["before 7am on saturday"],
+  "schedule": ["* 0-6 * * *"],
   "prConcurrentLimit": 1,
   "branchConcurrentLimit": 1,
   "minimumReleaseAge": "3 days",
   "rangeStrategy": "bump",
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 7am on saturday"]
+    "schedule": ["* 0-6 * * *"]
   },
   "packageRules": [
     {
