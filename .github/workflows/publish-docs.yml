@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish-docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: publish  # Secrets/Variables は publish Environment を再利用
     env:
       VLAKE_S3_ENDPOINT: ${{ secrets.VLAKE_S3_ENDPOINT }}
