@@ -21,12 +21,12 @@
     },
     {
       "matchManagers": ["mise", "pep621"],
-      "matchDepNames": ["python"],
+      "matchPackageNames": ["python", "python/cpython"],
       "separateMinorPatch": true
     },
     {
       "matchManagers": ["mise", "pep621"],
-      "matchDepNames": ["python"],
+      "matchPackageNames": ["python", "python/cpython"],
       "matchUpdateTypes": ["minor", "major"],
       "groupName": "Python runtime upgrades",
       "dependencyDashboardApproval": true
