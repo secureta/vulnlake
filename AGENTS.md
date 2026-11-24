@@ -78,6 +78,9 @@ README のスキーマ節、DATA_LICENSES.md、`.github/workflows/publish.yml` /
 実フォーマットを忠実に模したソースデータを生成する。ソースのフォーマット処理を変えたら
 conftest のフィクスチャも実データと一致しているか確認すること。
 
+S3 転送テストはループバック上の Moto に接続します。
+ローカルでは `uv run --group s3-test pytest -v tests/test_storage_s3.py` で実行できます。
+
 ## CI
 
 - **test.yml** (push/PR): pytest、ruff check、ruff format --check、zizmor、actionlint。actions は SHA ピン留め + `persist-credentials: false`。

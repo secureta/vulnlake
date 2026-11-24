@@ -25,6 +25,9 @@ dev = [
     "ruff>=0.17.3",
     "zizmor>=1.32.0",
 ]
+s3-test = [
+    "moto[server]>=5.2.5",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14"]
