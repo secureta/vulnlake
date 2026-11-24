@@ -404,7 +404,15 @@ uv run ruff format . --check
 uv run zizmor .github/workflows/
 ```
 
-CI also tests published catalogs with isolated DuckDB 1.5.2 and 1.5.6 readers.
+On a clean setup, `uv run pytest -v` skips the Moto-backed S3 transfer tests.
+To include them, run pytest with the optional `s3-test` dependency group:
+
+```bash
+uv run --group s3-test pytest -v
+```
+
+CI enables this group and also tests published catalogs with isolated DuckDB
+1.5.2 and 1.5.6 readers.
 To run the compatibility tests locally, create a separate Python environment
 containing one of those DuckDB versions and set `VLAKE_COMPAT_PYTHON` to its
 absolute Python executable path:
@@ -414,4 +422,5 @@ VLAKE_COMPAT_PYTHON=/absolute/path/to/reader/bin/python \
   uv run pytest -v tests/test_catalog_compatibility.py
 ```
 
-Without that variable, only the cross-version compatibility tests are skipped.
+The cross-version compatibility tests are skipped if `VLAKE_COMPAT_PYTHON`
+is not set.
