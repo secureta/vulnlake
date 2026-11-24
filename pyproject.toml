@@ -30,6 +30,9 @@ dev = [
 requires = ["uv_build>=0.13.7,<0.14"]
 build-backend = "uv_build"
 
+[tool.uv]
+exclude-newer = "1 day"
+
 [tool.ruff]
 target-version = "py312"
 
