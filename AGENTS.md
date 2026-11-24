@@ -17,7 +17,7 @@ S3 互換ストレージに公開するツール。正式名は **vulnlake**(REA
 
 ```bash
 uv sync
-uv run pytest -v                 # テスト全実行
+uv run pytest -v
 uv run pytest tests/test_pipeline.py -k backfill   # 単一ファイル / キーワード指定
 uv run ruff check .              # lint (isort/bugbear/pyupgrade/bandit 有効)
 uv run ruff format .             # フォーマット (CI では --check)
@@ -81,7 +81,9 @@ README のスキーマ節、DATA_LICENSES.md、`.github/workflows/publish.yml` /
 conftest のフィクスチャも実データと一致しているか確認すること。
 
 S3 転送テストはループバック上の Moto に接続します。
-ローカルでは `uv run --group s3-test pytest -v tests/test_storage_s3.py` で実行できます。
+標準の依存関係だけでは S3 転送テストはスキップされます。
+S3 も含める場合は `uv run --group s3-test pytest -v`、S3 のみ実行する場合は末尾に `tests/test_storage_s3.py` を指定してください。
+DuckDB の読み取り互換性テストは `VLAKE_COMPAT_PYTHON` が未設定の場合にスキップされます。
 
 ## CI
 
