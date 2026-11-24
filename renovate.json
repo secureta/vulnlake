@@ -20,6 +20,13 @@
       "groupName": "weekly non-major dependencies"
     },
     {
+      "matchManagers": ["mise", "pep621"],
+      "matchDepNames": ["python"],
+      "matchUpdateTypes": ["minor", "major"],
+      "groupName": "Python runtime upgrades",
+      "dependencyDashboardApproval": true
+    },
+    {
       "matchManagers": ["github-actions"],
       "groupName": "github-actions"
     }

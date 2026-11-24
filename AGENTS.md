@@ -13,8 +13,10 @@ S3 互換ストレージに公開するツール。正式名は **vulnlake**(REA
 
 ## コマンド
 
+実行環境の要件は `pyproject.toml` と `mise.toml` を参照してください。
+
 ```bash
-uv sync                          # 依存インストール (Python >= 3.14)
+uv sync
 uv run pytest -v                 # テスト全実行
 uv run pytest tests/test_pipeline.py -k backfill   # 単一ファイル / キーワード指定
 uv run ruff check .              # lint (isort/bugbear/pyupgrade/bandit 有効)
